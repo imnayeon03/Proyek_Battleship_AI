@@ -1,8 +1,8 @@
-"""ui/textutil.py - teks ramah pemain."""
-WORD = {"miss": "MELESET", "hit": "KENA!", "sunk": "KAPAL TENGGELAM!"}
+"""ui/textutil.py - player-friendly result text (English)."""
+WORD = {"miss": "MISS!", "hit": "HIT!", "sunk": "SHIP SUNK!"}
 
 
 def word(res) -> str:
     if res.result == "sunk" and res.ship:
-        return f"KAPAL {res.ship.upper()} TENGGELAM!"
+        return f"{res.ship.upper()} SUNK!"
     return WORD[res.result]

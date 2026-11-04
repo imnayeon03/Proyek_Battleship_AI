@@ -1,7 +1,7 @@
 """ui/session.py
-Logika sesi Human vs AI (TANPA pygame, sehingga bisa diuji).
-Pemain menembak papan AI; AI (BayesAI) membalas menembak papan pemain. Semua tembakan memakai Shot.apply().
-Cara bermain: MANUAL (human_fire) atau dibantu AI (hint / auto_step / auto_play).
+Human vs AI game session logic (no pygame, so it can be unit-tested).
+Player fires at AI board; AI (BayesAI) replies by firing at player's board. All shots use Shot.apply().
+Play manually (human_fire) or with AI assistance (hint / auto_step / auto_play).
 """
 from typing import List
 
@@ -16,20 +16,20 @@ from ui.textutil import word
 class GameSession:
     def __init__(self, human_layout, ai_layout, ai=None, helper=None):
         self.human_layout, self.ai_layout = human_layout, ai_layout
-        self.ai = ai or BayesAI()           # lawan: menembak armada pemain
-        self.helper = helper or BayesAI()   # pembantu: mengamati tembakan pemain, memberi saran
+        self.ai = ai or BayesAI()           # opponent: fires at player's fleet
+        self.helper = helper or BayesAI()   # helper: observes player's shots, gives hints
         self.reset()
 
     def reset(self):
         self.ai.reset()
         self.helper.reset()
-        self.hb, self.eb = Board(self.human_layout), Board(self.ai_layout)   # hb = armada Anda, eb = armada AI
+        self.hb, self.eb = Board(self.human_layout), Board(self.ai_layout)   # hb = your fleet, eb = AI fleet
         self.winner = None
         self.awaiting_ai = False
         self.used_ai = False
-        self.last_human = self.last_ai = None          # (sel, ShotResult)
+        self.last_human = self.last_ai = None          # (cell, ShotResult)
         self.log: List[str] = []
-        self.message = "Giliran Anda: klik papan radar atau ketik koordinat."
+        self.message = "Your turn: click on Enemy Radar or type coordinates."
 
     @property
     def finished(self) -> bool:
@@ -43,20 +43,20 @@ class GameSession:
         self.message = text
         self.log.append(text)
 
-    # ------------------------------------------------------------ giliran pemain
+    # ------------------------------------------------------------ player turn
     def human_fire(self, cell) -> bool:
         if self.finished or self.awaiting_ai:
             return False
         if cell in self.eb.shots:
-            self.message = "Sel itu sudah pernah Anda tembak."
+            self.message = "That cell was already fired upon."
             return False
-        res = Shot(cell, "Anda").apply(self.eb)
+        res = Shot(cell, "You").apply(self.eb)
         self.helper.update(cell, res)
         self.last_human = (cell, res)
-        self._say(f"Anda -> {label(cell)}: {word(res)}")
+        self._say(f"You -> {label(cell)}: {word(res)}")
         if self.eb.all_sunk():
             self.winner = "ANDA"
-            self._say(self.message + "   |   PEMENANG: ANDA")
+            self._say(self.message + "   |   WINNER: YOU")
         else:
             self.awaiting_ai = True
         return True
@@ -72,11 +72,11 @@ class GameSession:
         self._say(f"AI -> {label(cell)}: {word(res)}")
         if self.hb.all_sunk():
             self.winner = "AI"
-            self._say(self.message + "   |   PEMENANG: AI")
+            self._say(self.message + "   |   WINNER: AI")
         return True
 
     def fire(self, raw: str) -> bool:
-        """Tembak lewat teks (mis. 'E5'); AI langsung membalas. False jika input ditolak."""
+        """Fire via text (e.g. 'E5'); AI immediately replies. Returns False if rejected."""
         try:
             cell = parse_cell(raw)
         except ValueError as exc:
@@ -87,13 +87,13 @@ class GameSession:
         self.ai_reply()
         return True
 
-    # ------------------------------------------------------------ bantuan AI
+    # ------------------------------------------------------------ AI assistance
     def hint(self) -> Explanation:
         self.used_ai = True
         return explain_move(self.helper)
 
     def auto_step(self) -> bool:
-        """AI menembak untuk Anda (satu langkah), lalu lawan membalas jika sesi dijalankan tanpa animasi."""
+        """AI fires for you (one step), then opponent replies (if no animation)."""
         if self.finished or self.awaiting_ai:
             return False
         self.used_ai = True
