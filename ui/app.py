@@ -66,60 +66,68 @@ class App:
     # ------------------------------------------------------------ sound
     def _init_sounds(self):
         """Initialize pygame mixer and generate procedural sound effects."""
+        self._sound_ok = False
         try:
-            pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=512)
-            self.snd_shoot = self._gen_shoot()
-            self.snd_hit = self._gen_hit()
+            # Reinit mixer with stereo 44100 Hz — pygame.init() may have set different params
+            pygame.mixer.quit()
+            pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=1024)
+            self.snd_shoot  = self._gen_shoot()
+            self.snd_hit    = self._gen_hit()
             self.snd_splash = self._gen_splash()
-            self.snd_sunk = self._gen_sunk()
-            self._sound_ok = True
-        except Exception:
-            self._sound_ok = False
+            self.snd_sunk   = self._gen_sunk()
+            self._sound_ok  = True
+            print("[Sound] OK — stereo 44100 Hz, 4 effects loaded.")
+        except Exception as e:
+            print(f"[Sound] init failed: {e}")
 
     @staticmethod
-    def _make_wave(arr, volume=0.9):
-        """Clip and convert float array to int16 Sound."""
+    def _make_wave(mono, volume=0.9):
+        """Convert 1-D float array → stereo int16 pygame.Sound."""
         import numpy as np
-        arr = arr * volume
-        arr = arr / max(abs(arr).max(), 1e-6)
-        wave = (arr * 32767).clip(-32767, 32767).astype(np.int16)
-        return pygame.sndarray.make_sound(wave)
+        mono = np.asarray(mono, dtype=np.float64)
+        peak = np.abs(mono).max()
+        if peak > 1e-9:
+            mono = mono / peak
+        mono = (mono * volume * 32767).clip(-32767, 32767).astype(np.int16)
+        # Duplicate to stereo: shape (N, 2)
+        stereo = np.column_stack([mono, mono])
+        stereo = np.ascontiguousarray(stereo)
+        return pygame.sndarray.make_sound(stereo)
 
     def _gen_shoot(self):
         import numpy as np
-        sr = 44100; dur = 0.28
-        t = np.linspace(0, dur, int(sr * dur), False)
-        boom = np.sin(2 * np.pi * 85 * t) * np.exp(-t * 20)
-        noise = np.random.default_rng(1).uniform(-1, 1, len(t)) * np.exp(-t * 35) * 0.45
-        wave = boom + noise
-        return self._make_wave(wave, 0.70)
+        sr = 44100; dur = 0.30
+        t = np.linspace(0, dur, int(sr * dur), endpoint=False)
+        boom   = np.sin(2 * np.pi * 85 * t) * np.exp(-t * 18)
+        noise  = np.random.default_rng(1).uniform(-1, 1, len(t)) * np.exp(-t * 32) * 0.5
+        return self._make_wave(boom + noise, 0.72)
 
     def _gen_hit(self):
         import numpy as np
-        sr = 44100; dur = 0.42
-        t = np.linspace(0, dur, int(sr * dur), False)
-        boom = np.sin(2 * np.pi * 58 * t) * np.exp(-t * 9)
-        crackle = np.random.default_rng(2).uniform(-1, 1, len(t)) * np.exp(-t * 7) * 0.5
-        mid = np.sin(2 * np.pi * 290 * t) * np.exp(-t * 22) * 0.3
-        return self._make_wave(boom + crackle + mid, 0.78)
+        sr = 44100; dur = 0.45
+        t = np.linspace(0, dur, int(sr * dur), endpoint=False)
+        boom    = np.sin(2 * np.pi * 58 * t) * np.exp(-t * 8)
+        crackle = np.random.default_rng(2).uniform(-1, 1, len(t)) * np.exp(-t * 6) * 0.55
+        mid     = np.sin(2 * np.pi * 300 * t) * np.exp(-t * 20) * 0.3
+        return self._make_wave(boom + crackle + mid, 0.80)
 
     def _gen_splash(self):
         import numpy as np
-        sr = 44100; dur = 0.38
-        t = np.linspace(0, dur, int(sr * dur), False)
-        env = np.exp(-t * 7) * (1 - np.exp(-t * 60))
-        noise = np.random.default_rng(3).uniform(-1, 1, len(t)) * env
-        bubble = np.sin(2 * np.pi * 750 * t) * env * 0.25
-        return self._make_wave(noise + bubble, 0.55)
+        sr = 44100; dur = 0.40
+        t   = np.linspace(0, dur, int(sr * dur), endpoint=False)
+        env = np.exp(-t * 6) * (1 - np.exp(-t * 50))
+        noise  = np.random.default_rng(3).uniform(-1, 1, len(t)) * env
+        bubble = np.sin(2 * np.pi * 700 * t) * env * 0.28
+        return self._make_wave(noise + bubble, 0.58)
 
     def _gen_sunk(self):
         import numpy as np
-        sr = 44100; dur = 0.65
-        t = np.linspace(0, dur, int(sr * dur), False)
-        boom = np.sin(2 * np.pi * 48 * t) * np.exp(-t * 5.5)
-        boom2 = np.sin(2 * np.pi * 115 * t) * np.exp(-t * 9) * 0.5
-        noise = np.random.default_rng(4).uniform(-1, 1, len(t)) * np.exp(-t * 4.5) * 0.65
-        return self._make_wave(boom + boom2 + noise, 0.88)
+        sr = 44100; dur = 0.70
+        t     = np.linspace(0, dur, int(sr * dur), endpoint=False)
+        boom  = np.sin(2 * np.pi * 48 * t) * np.exp(-t * 5)
+        boom2 = np.sin(2 * np.pi * 110 * t) * np.exp(-t * 8) * 0.55
+        noise = np.random.default_rng(4).uniform(-1, 1, len(t)) * np.exp(-t * 4) * 0.65
+        return self._make_wave(boom + boom2 + noise, 0.90)
 
     def play_sound(self, name):
         if not self._sound_ok:
@@ -127,7 +135,10 @@ class App:
         snd = {"shoot": self.snd_shoot, "hit": self.snd_hit,
                "splash": self.snd_splash, "sunk": self.snd_sunk}.get(name)
         if snd:
-            snd.play()
+            try:
+                snd.play()
+            except Exception:
+                pass
 
     # ------------------------------------------------------------ fleet
     def _reset_battle(self):
