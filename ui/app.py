@@ -943,19 +943,19 @@ class App:
             g.card(x, tools_y, w, 175, "TOOLS")
             tw2, th = (w - 36 - 12) // 2, 42
             off = s.finished
-            tools = (("AI Hint",    "best shot",        "H", "hint",     STATIC["accent2"],    False),
-                     ("AI Fire",    "1 step",           "A", "ai_step",  STATIC["blue"],       False),
-                     ("Auto-play",  "AI plays for you", "T", "auto",     STATIC["good"],       self.auto),
-                     ("Heatmap",    "probability map",  "M", "heat",     (170, 90, 230),       self.show_heat),
-                     ("Analysis",   "Bayes vs Random",  "I", "analysis", (60, 170, 190),       False),
-                     ("Restart",    "start over",       "R", "restart",  STATIC["red"],        False))
+            tools = (("AI Hint",   "", "", "hint",     STATIC["accent2"], False),
+                     ("AI Fire",   "", "", "ai_step",  STATIC["blue"],    False),
+                     ("Auto-play", "", "", "auto",     STATIC["good"],    self.auto),
+                     ("Heatmap",   "", "", "heat",     (170, 90, 230),    self.show_heat),
+                     ("Analysis",  "", "", "analysis", (60, 170, 190),    False),
+                     ("Restart",   "", "", "restart",  STATIC["red"],     False))
             for i, (title, sub, key, tag, col, active) in enumerate(tools):
                 g.tool(x + 18 + (i % 2) * (tw2 + 12), tools_y + 34 + (i // 2) * 44,
                        tw2, th, title, sub, key, tag, col, active,
                        enabled=not off or tag in ("analysis", "restart"))
         else:
             g.card(x, tools_y, w, 86, "TOOLS")
-            g.tool(x + 18, tools_y + 32, w - 36, 44, "Restart", "start over", "R", "restart", STATIC["red"])
+            g.tool(x + 18, tools_y + 32, w - 36, 42, "Restart", "", "", "restart", STATIC["red"])
 
         # ---- Battle log card (Card 3: y = 525, h = 135)
         log_y = y + 375

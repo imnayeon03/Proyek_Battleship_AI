@@ -306,24 +306,60 @@ class Gfx:
         if enabled:
             self.buttons.append((pygame.Rect(int(x), int(y), int(w), int(h + 7)), tag))
 
+    def _draw_tool_glyph(self, tag, cx, cy, color):
+        screen = self.screen
+        if tag == "hint":
+            # Shining lightbulb
+            pygame.draw.circle(screen, (255, 245, 150), (cx, cy - 2), 5)
+            pygame.draw.rect(screen, (255, 205, 55), pygame.Rect(cx - 3, cy + 3, 6, 3), border_radius=1)
+            pygame.draw.line(screen, (255, 255, 255), (cx, cy - 5), (cx, cy - 8), 1)
+        elif tag == "ai_step":
+            # Target crosshair
+            pygame.draw.circle(screen, (255, 255, 255), (cx, cy), 6, 2)
+            pygame.draw.circle(screen, (255, 75, 75), (cx, cy), 2)
+            pygame.draw.line(screen, (255, 255, 255), (cx - 8, cy), (cx + 8, cy), 1)
+            pygame.draw.line(screen, (255, 255, 255), (cx, cy - 8), (cx, cy + 8), 1)
+        elif tag == "auto":
+            # Play triangle
+            pts = [(cx - 4, cy - 6), (cx + 5, cy), (cx - 4, cy + 6)]
+            pygame.draw.polygon(screen, (255, 255, 255), pts)
+        elif tag == "heat":
+            # 2x2 colored heat grid
+            pygame.draw.rect(screen, (255, 95, 75), pygame.Rect(cx - 6, cy - 6, 5, 5), border_radius=1)
+            pygame.draw.rect(screen, (255, 215, 60), pygame.Rect(cx + 1, cy - 6, 5, 5), border_radius=1)
+            pygame.draw.rect(screen, (60, 200, 240), pygame.Rect(cx - 6, cy + 1, 5, 5), border_radius=1)
+            pygame.draw.rect(screen, (255, 55, 95), pygame.Rect(cx + 1, cy + 1, 5, 5), border_radius=1)
+        elif tag == "analysis":
+            # Bar chart
+            pygame.draw.rect(screen, (255, 255, 255), pygame.Rect(cx - 6, cy + 1, 3, 5), border_radius=1)
+            pygame.draw.rect(screen, (255, 255, 255), pygame.Rect(cx - 2, cy - 3, 3, 9), border_radius=1)
+            pygame.draw.rect(screen, (255, 255, 255), pygame.Rect(cx + 2, cy - 7, 3, 13), border_radius=1)
+        elif tag == "restart":
+            # Circular reload arrow
+            pygame.draw.circle(screen, (255, 255, 255), (cx, cy), 6, 2)
+            pygame.draw.circle(screen, color, (cx + 3, cy), 4)
+            pygame.draw.polygon(screen, (255, 255, 255), [(cx + 2, cy - 6), (cx + 6, cy - 2), (cx + 1, cy - 2)])
+        else:
+            pygame.draw.circle(screen, (255, 255, 255), (cx, cy), 4)
+
     def tool(self, x, y, w, h, title, sub, key, tag, color, active=False, enabled=True):
-        """Tool card with candy styling, bright circle badge, and clean text."""
+        """Tool button with candy styling, bright graphic icon badge, and clean centered title (no subtext clutter)."""
         over = enabled and self._hover(x, y, w, h)
         fill = STATIC["purple"] if active else (mix(self.col("panel"), (255, 255, 255), 0.14) if over else self.col("panel"))
         self.rrect(x + 1, y + 4, w, h, (16, 12, 36), 14)
         self.rrect(x, y, w, h, fill, 14, (255, 235, 140) if active else self.col("edge"), 2)
         # Top shine
-        self.rrect(x + 3, y + 2, w - 6, h // 3, mix(fill, (255, 255, 255), 0.15), 10)
+        self.rrect(x + 3, y + 2, w - 6, max(4, h // 3), mix(fill, (255, 255, 255), 0.15), 10)
 
-        cx, cy = int(x + 28), int(y + h / 2)
+        cx, cy = int(x + 24), int(y + h / 2)
         # Icon badge with candy 3D look
-        pygame.draw.circle(self.screen, (20, 14, 44), (cx, cy + 2), 16)
-        pygame.draw.circle(self.screen, color, (cx, cy), 15)
-        pygame.draw.circle(self.screen, (255, 255, 255), (cx, cy), 15, 2)
-        self.text(key, 15, (255, 255, 255), cx, cy - 10, True, True, shadow=True)
+        pygame.draw.circle(self.screen, (20, 14, 44), (cx, cy + 2), 14)
+        pygame.draw.circle(self.screen, color, (cx, cy), 13)
+        pygame.draw.circle(self.screen, (255, 255, 255), (cx, cy), 13, 2)
+        self._draw_tool_glyph(tag, cx, cy, color)
 
-        self.text(title, 14, (255, 255, 255) if enabled else self.col("dim"), x + 54, y + 9, True)
-        self.text(sub, 11, self.col("dim"), x + 54, y + 29, True)
+        # Clean, centered title without subtext clutter
+        self.text(title, 14, (255, 255, 255) if enabled else self.col("dim"), x + 46, y + h // 2 - 8, True)
         if enabled:
             self.buttons.append((pygame.Rect(int(x), int(y), int(w), int(h)), tag))
 

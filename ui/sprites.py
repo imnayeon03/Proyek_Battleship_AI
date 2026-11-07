@@ -382,19 +382,76 @@ def draw_frame(g, rect):
     """Bubbly cartoon frame around game board."""
     x, y, w, h = rect
     # 3D drop shadow
-    g.rrect(x - 24, y - 18, w + 36, h + 42, (18, 12, 38), 24)
+    g.rrect(x - 18, y - 12, w + 36, h + 36, (18, 12, 38), 22)
     # Outer candy purple frame
-    g.rrect(x - 24, y - 24, w + 36, h + 42, g.col("frame"), 24)
-    # Inner rim
-    g.rrect(x - 12, y - 14, w + 12, h + 18, g.col("frame_in"), 16)
+    g.rrect(x - 18, y - 18, w + 36, h + 36, g.col("frame"), 22)
+    # Inner basin rim
+    g.rrect(x - 6, y - 6, w + 12, h + 12, (10, 36, 78), 14)
+
+
+def draw_water_tiles(g, lay, which, t):
+    """Draw a grid of 3D tactile cartoon water tiles (petak air),
+    matching the casual naval puzzle game reference:
+    - Individual rounded tiles with separation seams
+    - 3D drop bevel giving physical tile thickness
+    - Vibrant turquoise/azure ocean top face
+    - Subtle horizontal wavy ripple grooves across each tile
+    - Soft top-rim gloss highlight
+    """
+    screen = g.screen
+    tod = g.tod
+
+    # Palette
+    bevel_col = (14, 70, 142) if tod < 0.5 else (10, 36, 75)
+    top_col   = (38, 170, 240) if tod < 0.5 else (22, 90, 155)
+    bot_col   = (20, 136, 212) if tod < 0.5 else (14, 60, 115)
+    hi_col    = (118, 224, 255) if tod < 0.5 else (55, 145, 205)
+    rip_col   = (70, 204, 255) if tod < 0.5 else (35, 120, 175)
+    shd_col   = (14, 96, 170) if tod < 0.5 else (8, 42, 85)
+    edge_col  = (16, 94, 172) if tod < 0.5 else (10, 42, 86)
+
+    rad = 7
+    bevel_h = 3
+
+    for r in range(N):
+        for c in range(N):
+            rx, ry, rw, rh = lay.cell_rect(which, (r, c))
+            tx = int(rx + 2)
+            ty = int(ry + 2)
+            tw = int(rw - 4)
+            th = int(rh - 4)
+            face_h = th - 1
+            ph = r * 0.72 + c * 1.15 + (1.7 if which == "enemy" else 0.0)
+
+            # 1. 3D Bottom Bevel (Physical Tile Thickness)
+            g.rrect(tx, ty + bevel_h, tw, th, bevel_col, rad)
+
+            # 2. Main Water Tile Face (Azure / Cyan Gradient)
+            g.rrect(tx, ty, tw, face_h, top_col, rad)
+            g.rrect(tx + 1, ty + face_h // 2, tw - 2, face_h // 2, bot_col, max(2, rad - 2))
+
+            # 3. Top Edge Gloss Highlight
+            pygame.draw.line(screen, hi_col, (tx + 5, ty + 1), (tx + tw - 6, ty + 1), 2)
+
+            # 4. Two Horizontal Wavy Water Ripples (Signature reference look)
+            for wave_idx, frac in enumerate([0.35, 0.68]):
+                wy = ty + face_h * frac
+                wob = math.sin(t * 2.2 + ph + wave_idx * 2.4) * 1.2
+                pts = [
+                    (int(tx + 4), int(wy - wob * 0.4)),
+                    (int(tx + tw * 0.35), int(wy + wob)),
+                    (int(tx + tw * 0.70), int(wy - wob * 0.6)),
+                    (int(tx + tw - 5), int(wy + wob * 0.3))
+                ]
+                pygame.draw.lines(screen, shd_col, False, [(p[0], p[1] + 1) for p in pts], 1)
+                pygame.draw.lines(screen, rip_col, False, pts, 1)
+
+            # 5. Crisp Tile Outline
+            pygame.draw.rect(screen, edge_col, pygame.Rect(tx, ty, tw, face_h), 1, border_radius=rad)
 
 
 def draw_grid(g, lay, which):
     x0, y0, w, h = lay.board_rect(which)
-    c = mix(g.col("deep"), g.col("wave"), 0.32)
-    for i in range(N + 1):
-        pygame.draw.line(g.screen, c, P(x0 + i * lay.cell, y0), P(x0 + i * lay.cell, y0 + h), 1)
-        pygame.draw.line(g.screen, c, P(x0, y0 + i * lay.cell), P(x0 + w, y0 + i * lay.cell), 1)
     for i in range(N):
         g.text("ABCDEFGHIJ"[i], 14, (255, 255, 255), x0 + i * lay.cell + lay.cell / 2, y0 - 24, True, True, shadow=True)
         g.text(str(i + 1), 14, (255, 255, 255), x0 - 14, y0 + i * lay.cell + lay.cell / 2 - 9, True, True, shadow=True)
@@ -402,8 +459,13 @@ def draw_grid(g, lay, which):
 
 def draw_board_water(g, lay, which, t):
     rect = lay.board_rect(which)
+    x0, y0, w, h = rect
     draw_frame(g, rect)
-    draw_sea_surface(g, rect, t, 0.0 if which == "human" else 1.7)
+    # Recessed tray basin floor underneath tiles
+    pygame.draw.rect(g.screen, (10, 36, 78), pygame.Rect(int(x0), int(y0), int(w), int(h)), border_radius=10)
+    # 3D Water Tiles (petak-petak air)
+    draw_water_tiles(g, lay, which, t)
+    # Grid coordinates
     draw_grid(g, lay, which)
 
 
@@ -689,13 +751,14 @@ def draw_flame(g, cx, cy, t, ph):
 
 
 def draw_ripple(g, cx, cy, t, ph):
-    col = g.col("wave")
+    col = (115, 220, 255)
+    pygame.draw.circle(g.screen, (12, 60, 120), P(cx, cy + 1), 10)
     for k in range(2):
         age = ((t * 0.9 + ph + k * 0.5) % 1.0)
-        r = 4 + age * 13
-        c = mix(col, g.col("deep"), age)
+        r = 3 + age * 12
+        c = mix(col, (18, 90, 165), age)
         pygame.draw.circle(g.screen, c, P(cx, cy), int(r), 2)
-    pygame.draw.circle(g.screen, col, P(cx, cy), 3)
+    pygame.draw.circle(g.screen, (255, 255, 255), P(cx, cy), 3)
 
 
 def draw_marks(g, lay, which, shots, t, hidden=()):
@@ -712,14 +775,16 @@ def draw_marks(g, lay, which, shots, t, hidden=()):
 
 def draw_hover(g, lay, which, cell, t):
     x, y, w, h = lay.cell_rect(which, cell)
-    pulse = 2 * math.sin(t * 6)
-    g.rrect(x + 2 - pulse / 2, y + 2 - pulse / 2, w - 4 + pulse, h - 4 + pulse,
-            mix(g.col("shallow"), (255, 255, 255), 0.35), 10,
-            STATIC["accent2"], 2)
+    pulse = 1.5 * math.sin(t * 6)
+    tx, ty, tw, th = int(x + 2 - pulse), int(y + 2 - pulse), int(w - 4 + pulse * 2), int(h - 4 + pulse * 2)
+    g.rrect(tx, ty, tw, th, (255, 245, 180), 8, (255, 215, 50), 2)
     cx, cy = int(x + w / 2), int(y + h / 2)
-    pygame.draw.line(g.screen, STATIC["accent2"], (cx - 9, cy), (cx + 9, cy), 2)
-    pygame.draw.line(g.screen, STATIC["accent2"], (cx, cy - 9), (cx, cy + 9), 2)
-    pygame.draw.circle(g.screen, STATIC["accent2"], (cx, cy), 7, 2)
+    pygame.draw.circle(g.screen, (255, 255, 255), (cx, cy), 8, 2)
+    pygame.draw.circle(g.screen, (255, 60, 60), (cx, cy), 3)
+    pygame.draw.line(g.screen, (255, 255, 255), (cx - 10, cy), (cx - 3, cy), 2)
+    pygame.draw.line(g.screen, (255, 255, 255), (cx + 3, cy), (cx + 10, cy), 2)
+    pygame.draw.line(g.screen, (255, 255, 255), (cx, cy - 10), (cx, cy - 3), 2)
+    pygame.draw.line(g.screen, (255, 255, 255), (cx, cy + 3), (cx, cy + 10), 2)
 
 
 def draw_heat(g, lay, which, prob):
