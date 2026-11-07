@@ -221,11 +221,13 @@ class Gfx:
             self.rrect(x + 14, y + 10, tw, th, (30, 22, 62), 14, self.col("edge"), 1)
             self.text(title.upper(), 12, STATIC["accent"], x + 14 + tw / 2, y + 16, True, center=True)
 
-    def pill(self, x, y, s, size=14, fill=None, color=None, border=None, h=None, right=False):
+    def pill(self, x, y, s, size=14, fill=None, color=None, border=None, h=None, right=False, center=False):
         """Casual rounded pill capsule badge."""
         w = self.text_size(s, size, True)[0] + 28
         h = h or size + 16
-        if right:
+        if center:
+            x -= w // 2
+        elif right:
             x -= w
         # 3D shadow
         self.rrect(x + 1, y + 4, w, h, (18, 12, 38), h // 2)
