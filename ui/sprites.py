@@ -257,11 +257,13 @@ def draw_adventure_sailboat(g, cx, cy, sc=1.0, t=0.0, bob=True):
 
     # 4. Cat Captain with Brass Telescope
     cat_center = rot(-16, -14)
-    pygame.draw.circle(screen, (240, 165, 75), cat_center, int(13 * sc))
-    draw_ellipse(screen, (255, 215, 60), pygame.Rect(cat_center[0] - 14 * sc, cat_center[1] - 16 * sc, 28 * sc, 12 * sc))
+    pygame.draw.circle(screen, (240, 165, 75), cat_center, max(2, int(13 * sc)))
+    draw_ellipse(screen, (255, 215, 60),
+                 pygame.Rect(int(cat_center[0] - 14 * sc), int(cat_center[1] - 16 * sc),
+                             max(4, int(28 * sc)), max(2, int(12 * sc))))
     tele_start = rot(-8, -12)
     tele_end = rot(28, -26)
-    pygame.draw.line(screen, (255, 200, 45), tele_start, tele_end, max(3, int(6 * sc)))
+    pygame.draw.line(screen, (255, 200, 45), tele_start, tele_end, max(2, int(6 * sc)))
     pygame.draw.circle(screen, (255, 235, 120), tele_end, max(2, int(4 * sc)))
 
     # 5. Wooden Hull (Caramel Oak Planks with Golden Rim)
@@ -272,17 +274,17 @@ def draw_adventure_sailboat(g, cx, cy, sc=1.0, t=0.0, bob=True):
     line_y_offsets = [10, 22, 34]
     for ly in line_y_offsets:
         pygame.draw.line(screen, (160, 95, 45), rot(-55, ly), rot(55, ly), max(1, int(2 * sc)))
-    pygame.draw.lines(screen, (250, 195, 80), False, [rot(-64, -2), rot(68, -2), rot(84, -18)], max(3, int(6 * sc)))
+    pygame.draw.lines(screen, (250, 195, 80), False, [rot(-64, -2), rot(68, -2), rot(84, -18)], max(2, int(6 * sc)))
     pygame.draw.polygon(screen, (115, 62, 28), hull_pts, 2)
 
     # 6. Big Puffy Bow Wave Foam Splashes (Curling foam plumes)
     splash_pts = [(45, 16), (62, 10), (78, 14), (92, 26), (82, 38), (60, 42),
                   (-35, 22), (-52, 18), (-68, 24), (-78, 36), (-60, 44)]
     for dx, dy in splash_pts:
-        sp_r = int((14 + 4 * math.sin(dx + t * 6)) * sc)
+        sp_r = max(1, int((14 + 4 * math.sin(dx + t * 6)) * sc))
         pygame.draw.circle(screen, (185, 232, 248), rot(dx, dy + 4), sp_r)
     for dx, dy in splash_pts:
-        sp_r = int((13 + 4 * math.sin(dx + t * 6)) * sc)
+        sp_r = max(1, int((13 + 4 * math.sin(dx + t * 6)) * sc))
         pygame.draw.circle(screen, (255, 255, 255), rot(dx, dy), sp_r)
 
 
@@ -344,11 +346,6 @@ def draw_sea(g, t):
         pygame.draw.polygon(screen, mix(wave_col, g.col("sea2"), g.tod * 0.7), [P(x, y) for x, y in poly])
         draw_seafoam_swirls(screen, 0, W, base_y + 18, t, phase=base_y * 0.05)
         draw_puffy_wave_crest(screen, pts, t + base_y * 0.1, sc=foam_sc, step=step)
-
-    # 5. Adventure Sailboat riding the waves
-    boat_x = (t * 36) % (W + 400) - 200
-    boat_y = HORIZON + 155 + math.sin(t * 2.2) * 14
-    draw_adventure_sailboat(g, boat_x, boat_y, sc=1.1, t=t, bob=True)
 
 
 def draw_sea_surface(g, rect, t, phase=0.0):
@@ -655,8 +652,26 @@ def draw_ship(g, lay, which, name, cells, t, sunk=False):
 
 
 def draw_ship_icon(g, cx, cy, sc, t, hull=None, bob=True):
-    """Icon badge showing the iconic adventure sailboat."""
-    draw_adventure_sailboat(g, cx, cy, sc=sc * 0.45, t=t, bob=bob)
+    """Icon badge showing the iconic adventure sailboat in normalized units."""
+    cy += math.sin(t * 2.2) * sc * 0.08 if bob else 0
+
+    def pl(pts, col):
+        pygame.draw.polygon(g.screen, col, [P(cx + u * sc, cy + v * sc) for u, v in pts])
+
+    # Hull Shadow
+    pl([(-0.95, 0.15), (1.05, 0.15), (0.75, 0.65), (-0.75, 0.65)], (20, 14, 38))
+    # Caramel Oak Wooden Hull
+    pl([(-0.95, 0.10), (1.05, 0.10), (0.75, 0.60), (-0.75, 0.60)], (215, 145, 75))
+    # Golden Trim Rim
+    pl([(-0.85, 0.10), (1.05, 0.10), (1.0, 0.22), (-0.8, 0.22)], (250, 195, 80))
+    # Mast
+    pygame.draw.line(g.screen, (130, 80, 42), P(cx, cy + 0.10 * sc), P(cx, cy - 0.95 * sc), max(2, int(sc * 0.12)))
+    # Striped Red & Cream Billowing Sail
+    pl([(0.0, -0.85), (0.75, -0.1), (0.0, -0.1)], (235, 68, 62))
+    pl([(0.0, -0.85), (-0.65, -0.1), (0.0, -0.1)], (252, 248, 238))
+    # Red Masthead Pennant Flag
+    flag_w = math.sin(t * 6) * 0.1 * sc
+    pl([(0.0, -0.95), (-0.4, -1.05 + flag_w / sc), (-0.35, -0.85 + flag_w / sc)], (245, 45, 65))
 
 
 # ================================================================== MARKS & HOVER

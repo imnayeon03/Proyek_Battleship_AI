@@ -654,9 +654,9 @@ class App:
         pulse_fill = 0.85 + 0.15 * math.sin(t * 3)
         g.bar(W // 2 - cw // 2, 590, cw, ch, pulse_fill, STATIC["good"])
 
-        # Sailing cartoon warship
-        x = (t * 70) % (W + 500) - 250
-        sprites.draw_ship_icon(g, x, 675 + math.sin(t * 2.4) * 4, 46, t)
+        # Sailing adventure sailboat bobbing on the bottom waves
+        x = (t * 40) % (W + 300) - 150
+        sprites.draw_adventure_sailboat(g, x, 682, sc=0.45, t=t, bob=True)
 
         right = 1300
         self.pill_button(right, 30, ("DAY" if self.tod_target < 0.5 else "NIGHT") + " MODE", "tod")
