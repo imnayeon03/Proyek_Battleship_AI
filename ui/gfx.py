@@ -69,6 +69,7 @@ BTN = {
     "normal":  (52, 150, 255),   # Vibrant sky-blue
     "danger":  (248, 62, 88),    # Strawberry ruby red
     "purple":  (152, 88, 242),   # Grape purple
+    "coral":   (235, 62, 48),    # Glossy coral red (matching 'Seviye 12' pill button)
     "off":     (82, 75, 110),    # Soft muted lavender
 }
 
@@ -79,6 +80,7 @@ BTN_BEVEL = {
     "normal":  (24, 94, 195),
     "danger":  (175, 28, 54),
     "purple":  (102, 45, 175),
+    "coral":   (168, 26, 18),
     "off":     (48, 42, 68),
 }
 
@@ -286,7 +288,16 @@ class Gfx:
 
         # 5. Crisp cartoon outline
         outline_col = (24, 16, 52)
-        pygame.draw.rect(self.screen, outline_col, pygame.Rect(int(x), int(face_y), int(w), int(h)), 2, border_radius=rad)
+        if style == "coral":
+            # Outer white/cream thick capsule border (matching 'Seviye 12' pill button)
+            pygame.draw.rect(self.screen, (255, 252, 240), pygame.Rect(int(x), int(face_y), int(w), int(h)), 4, border_radius=rad)
+            # Cute corner ribbon tag
+            tag_w, tag_h = 34, 24
+            tx, ty = int(x + w - tag_w - 6), int(face_y - 8)
+            self.rrect(tx, ty, tag_w, tag_h, (255, 175, 25), 8, (255, 255, 255), 2)
+            self.text("x2", 12, (255, 255, 255), tx + tag_w / 2, ty + 3, True, True, shadow=True)
+        else:
+            pygame.draw.rect(self.screen, outline_col, pygame.Rect(int(x), int(face_y), int(w), int(h)), 2, border_radius=rad)
 
         # 6. Button label with clean 3D text
         txt_col = (255, 255, 255) if enabled else self.col("dim")

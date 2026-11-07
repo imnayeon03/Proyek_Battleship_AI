@@ -159,82 +159,226 @@ def wave_points(x0, x1, base, amp, length, speed, t, step=22):
     return pts
 
 
+def draw_puffy_wave_crest(screen, pts, t, sc=1.0, step=12):
+    """Draw cloud-like puffy white wave foam crests along wave points, matching reference image."""
+    # 1. Soft mint-aqua bottom shadow billows
+    for i in range(0, len(pts), step):
+        px, py = pts[i]
+        r = int((13 + 4 * math.sin(i * 0.4 + t * 3)) * sc)
+        pygame.draw.circle(screen, (185, 230, 245), P(px, py + 4 * sc), r)
+    # 2. Main brilliant white foam billows
+    for i in range(0, len(pts), step):
+        px, py = pts[i]
+        r = int((12 + 4 * math.sin(i * 0.4 + t * 3)) * sc)
+        pygame.draw.circle(screen, (255, 255, 255), P(px, py), r)
+    # 3. Bright top highlight puffs
+    for i in range(0, len(pts), step * 2):
+        px, py = pts[i]
+        r = int((7 + 3 * math.sin(i * 0.8 + t * 4)) * sc)
+        pygame.draw.circle(screen, (255, 255, 255), P(px, py - 3 * sc), r)
+
+
+def draw_seafoam_swirls(screen, x0, x1, y_base, t, phase=0.0):
+    """Draw curved seafoam lace ribbons across the wave surface, matching reference image."""
+    swirl_col = (235, 252, 255)
+    width = x1 - x0
+    count = max(2, int(width // 160))
+    for s_i in range(count):
+        sx = x0 + ((s_i * 180 + t * 25 + phase * 60) % max(1, width))
+        sy = y_base + math.sin(t * 2 + s_i + phase) * 12
+        pts = [
+            P(sx, sy),
+            P(sx + 35, sy - 8),
+            P(sx + 75, sy + 6),
+            P(sx + 115, sy - 4),
+            P(sx + 145, sy + 2)
+        ]
+        pygame.draw.lines(screen, swirl_col, False, pts, 2)
+        pygame.draw.circle(screen, (255, 255, 255), P(sx + 40, sy - 14), 2)
+        pygame.draw.circle(screen, (255, 255, 255), P(sx + 90, sy + 12), 2)
+
+
+def draw_adventure_sailboat(g, cx, cy, sc=1.0, t=0.0, bob=True):
+    """Draw the wooden expedition boat from the reference image:
+    - Caramel-oak wooden hull with golden trim rim
+    - Striped billowing sail (coral red and cream-white vertical stripes)
+    - Masthead red pennant flag
+    - Crashing puffy white sea-foam splashes curling around the hull
+    - Cat captain with brass telescope!
+    """
+    screen = g.screen
+    bob_y = math.sin(t * 2.8) * 8 * sc if bob else 0
+    pitch = math.sin(t * 2.4) * 0.08 if bob else 0
+    cy += bob_y
+
+    def rot(dx, dy):
+        rx = dx * math.cos(pitch) - dy * math.sin(pitch)
+        ry = dx * math.sin(pitch) + dy * math.cos(pitch)
+        return P(cx + rx * sc, cy + ry * sc)
+
+    # 1. Wooden Mast
+    pygame.draw.line(screen, (130, 80, 42), rot(0, 10), rot(0, -120), max(3, int(7 * sc)))
+    # Cross spars
+    pygame.draw.line(screen, (150, 95, 50), rot(-45, -112), rot(45, -112), max(2, int(4 * sc)))
+    pygame.draw.line(screen, (150, 95, 50), rot(-55, -25), rot(55, -25), max(2, int(4 * sc)))
+
+    # 2. Billowing Striped Sail (Red & Cream Stripes)
+    sail_top_y, sail_bot_y = -110, -28
+    sail_w = 48
+    stripes = 5
+    for st in range(stripes):
+        frac1 = st / stripes
+        frac2 = (st + 1) / stripes
+        dx1 = -sail_w + frac1 * (sail_w * 2)
+        dx2 = -sail_w + frac2 * (sail_w * 2)
+        col = (235, 68, 62) if (st % 2 == 1) else (252, 248, 238)
+        belly1 = math.sin(frac1 * math.pi) * 12
+        belly2 = math.sin(frac2 * math.pi) * 12
+        pts = [
+            rot(dx1, sail_top_y),
+            rot(dx2, sail_top_y),
+            rot(dx2 + belly2, sail_bot_y),
+            rot(dx1 + belly1, sail_bot_y)
+        ]
+        pygame.draw.polygon(screen, col, pts)
+    pygame.draw.polygon(screen, (160, 50, 45), [
+        rot(-sail_w, sail_top_y), rot(sail_w, sail_top_y),
+        rot(sail_w, sail_bot_y), rot(-sail_w, sail_bot_y)
+    ], 2)
+
+    # 3. Masthead Red Pennant Flag
+    flag_wave = math.sin(t * 8) * 6
+    flag_pts = [
+        rot(0, -122),
+        rot(-34, -130 + flag_wave),
+        rot(-30, -114 + flag_wave)
+    ]
+    pygame.draw.polygon(screen, (245, 45, 65), flag_pts)
+
+    # 4. Cat Captain with Brass Telescope
+    cat_center = rot(-16, -14)
+    pygame.draw.circle(screen, (240, 165, 75), cat_center, int(13 * sc))
+    draw_ellipse(screen, (255, 215, 60), pygame.Rect(cat_center[0] - 14 * sc, cat_center[1] - 16 * sc, 28 * sc, 12 * sc))
+    tele_start = rot(-8, -12)
+    tele_end = rot(28, -26)
+    pygame.draw.line(screen, (255, 200, 45), tele_start, tele_end, max(3, int(6 * sc)))
+    pygame.draw.circle(screen, (255, 235, 120), tele_end, max(2, int(4 * sc)))
+
+    # 5. Wooden Hull (Caramel Oak Planks with Golden Rim)
+    hull_pts = [
+        rot(-62, -2), rot(68, -2), rot(82, -18), rot(72, 22), rot(30, 42), rot(-45, 42), rot(-68, 20)
+    ]
+    pygame.draw.polygon(screen, (215, 145, 75), hull_pts)
+    line_y_offsets = [10, 22, 34]
+    for ly in line_y_offsets:
+        pygame.draw.line(screen, (160, 95, 45), rot(-55, ly), rot(55, ly), max(1, int(2 * sc)))
+    pygame.draw.lines(screen, (250, 195, 80), False, [rot(-64, -2), rot(68, -2), rot(84, -18)], max(3, int(6 * sc)))
+    pygame.draw.polygon(screen, (115, 62, 28), hull_pts, 2)
+
+    # 6. Big Puffy Bow Wave Foam Splashes (Curling foam plumes)
+    splash_pts = [(45, 16), (62, 10), (78, 14), (92, 26), (82, 38), (60, 42),
+                  (-35, 22), (-52, 18), (-68, 24), (-78, 36), (-60, 44)]
+    for dx, dy in splash_pts:
+        sp_r = int((14 + 4 * math.sin(dx + t * 6)) * sc)
+        pygame.draw.circle(screen, (185, 232, 248), rot(dx, dy + 4), sp_r)
+    for dx, dy in splash_pts:
+        sp_r = int((13 + 4 * math.sin(dx + t * 6)) * sc)
+        pygame.draw.circle(screen, (255, 255, 255), rot(dx, dy), sp_r)
+
+
 def draw_sea(g, t):
-    """Realistic tropical Caribbean ocean with depth layers, swimming fish, and sun caustics."""
-    bands = 24
+    """Stylized cartoon ocean with dramatic volumetric puffy foam waves,
+    swirling seafoam lace, and adventure sailboat matching the user's reference image."""
+    screen = g.screen
+
+    # 1. Base Ocean Gradient (Cerulean horizon -> Deep Royal Ocean)
+    bands = 28
     for i in range(bands):
         y0 = HORIZON + i * (H - HORIZON) // bands
         frac = i / bands
-        # Tropical gradient: Shallow radiant turquoise -> Deep royal azure
-        c = mix((48, 202, 228), (14, 85, 165), frac)
-        pygame.draw.rect(g.screen, mix(c, g.col("sea2"), g.tod * 0.7),
+        c = mix((28, 175, 230), (10, 80, 160), frac)
+        pygame.draw.rect(screen, mix(c, (14, 28, 65), g.tod * 0.7),
                          pygame.Rect(0, y0, W, (H - HORIZON) // bands + 2))
 
-    # Swimming tropical fish beneath crystal-clear water
+    # 2. Distant Tropical Cliff & Fairytale Tower on Right Horizon (matching reference!)
+    cliff_x = W - 220
+    cliff_y = HORIZON + 15
+    cliff_pts = [
+        P(cliff_x, cliff_y + 80), P(cliff_x + 40, cliff_y - 20),
+        P(cliff_x + 110, cliff_y - 35), P(cliff_x + 180, cliff_y - 15),
+        P(W, cliff_y + 10), P(W, cliff_y + 90), P(cliff_x, cliff_y + 90)
+    ]
+    pygame.draw.polygon(screen, (160, 125, 95), cliff_pts)
+    pygame.draw.polygon(screen, (75, 195, 85), [
+        P(cliff_x + 35, cliff_y - 20), P(cliff_x + 110, cliff_y - 35),
+        P(cliff_x + 180, cliff_y - 15), P(cliff_x + 175, cliff_y - 5),
+        P(cliff_x + 105, cliff_y - 22), P(cliff_x + 40, cliff_y - 12)
+    ])
+    tow_x, tow_y = cliff_x + 115, cliff_y - 35
+    pygame.draw.rect(screen, (245, 235, 220), pygame.Rect(tow_x - 12, tow_y - 38, 24, 38), border_radius=4)
+    pygame.draw.polygon(screen, (225, 65, 80), [
+        P(tow_x - 16, tow_y - 38), P(tow_x + 16, tow_y - 38), P(tow_x, tow_y - 62)
+    ])
+
+    # 3. Swimming tropical fish
     for f in FISH_SCHOOL:
         fx = (f["x"] + t * f["sp"]) % (W + 120) - 60
         fy = f["y"] + math.sin(t * 2.5 + f["ph"]) * 10
-        tail_wag = math.sin(t * 9 + f["ph"]) * 4
-        # Fish body
-        fish_col = mix(f["col"], (20, 45, 90), g.tod * 0.6)
-        pygame.draw.polygon(g.screen, fish_col, [
+        fcol = mix(f["col"], (20, 50, 95), g.tod * 0.6)
+        pygame.draw.polygon(screen, fcol, [
             P(fx + f["sz"], fy), P(fx, fy - f["sz"] * 0.45),
             P(fx - f["sz"] * 0.7, fy), P(fx, fy + f["sz"] * 0.45)
         ])
-        # Tail fin
-        pygame.draw.polygon(g.screen, mix(fish_col, (255, 255, 255), 0.2), [
-            P(fx - f["sz"] * 0.7, fy),
-            P(fx - f["sz"] * 1.3, fy - f["sz"] * 0.5 + tail_wag),
-            P(fx - f["sz"] * 1.3, fy + f["sz"] * 0.5 + tail_wag)
-        ])
 
-    # Animated tropical sunlight caustics (glistening refracted sun patterns)
-    for k in range(5):
-        base_y = HORIZON + 40 + k * 64
-        pts = wave_points(0, W, base_y, 4.5, 38 + k * 8, 1.4 + k * 0.2, t * 1.2 + k * 1.5, step=14)
-        col_caustic = mix((215, 245, 255), (60, 195, 240), 0.35 + 0.12 * k)
-        pygame.draw.lines(g.screen, col_caustic, False, [P(x, y) for x, y in pts], 2)
+    # 4. Multi-Layer Rolling Oceanic Waves with Volumetric Puffy Foam Crests
+    wave_layers = [
+        (HORIZON + 35, 7.0, 75, 1.2, (25, 155, 220), 0.7, 18),
+        (HORIZON + 95, 10.0, 85, 1.4, (20, 140, 208), 0.9, 16),
+        (HORIZON + 175, 14.0, 95, 1.6, (16, 120, 192), 1.15, 14),
+        (HORIZON + 265, 18.0, 110, 1.9, (12, 100, 175), 1.35, 12),
+    ]
 
-    # Playful cartoon wave layers & foamy crests
-    for i in range(4):
-        base = HORIZON + 24 + i * 78
-        pts = wave_points(0, W, base, 5 + i * 2.0, 70 + i * 20, 1.1 + i * 0.25, t + i * 2)
+    for base_y, amp, period, speed, wave_col, foam_sc, step in wave_layers:
+        pts = wave_points(0, W, base_y, amp, period, speed, t, step=12)
         poly = pts + [(W, H), (0, H)]
-        col = mix((36, 175, 225), (10, 75, 150), 0.25 + i * 0.22)
-        pygame.draw.polygon(g.screen, mix(col, g.col("sea2"), g.tod * 0.7), [P(x, y) for x, y in poly])
-        pygame.draw.lines(g.screen, (245, 252, 255), False, [P(x, y) for x, y in pts], 3)
+        pygame.draw.polygon(screen, mix(wave_col, g.col("sea2"), g.tod * 0.7), [P(x, y) for x, y in poly])
+        draw_seafoam_swirls(screen, 0, W, base_y + 18, t, phase=base_y * 0.05)
+        draw_puffy_wave_crest(screen, pts, t + base_y * 0.1, sc=foam_sc, step=step)
 
-    # Cute cartoon sailboat bobbing on the horizon
-    bx = (t * 22) % (W + 200) - 100
-    by = HORIZON + 4 + math.sin(t * 2.5) * 2.0
-    pygame.draw.polygon(g.screen, (195, 62, 85),
-                        [P(bx - 14, by), P(bx + 14, by), P(bx + 9, by + 7), P(bx - 9, by + 7)])
-    pygame.draw.polygon(g.screen, (255, 255, 255),
-                        [P(bx, by - 2), P(bx, by - 24), P(bx + 13, by - 2)])
+    # 5. Adventure Sailboat riding the waves
+    boat_x = (t * 36) % (W + 400) - 200
+    boat_y = HORIZON + 155 + math.sin(t * 2.2) * 14
+    draw_adventure_sailboat(g, boat_x, boat_y, sc=1.1, t=t, bob=True)
 
 
 def draw_sea_surface(g, rect, t, phase=0.0):
-    """Playful cartoon sea surface inside game board: tropical turquoise depth + moving wave sparkles."""
+    """Playful cartoon sea surface inside game board: tropical turquoise depth + puffy waves + seafoam swirls."""
     x0, y0, w, h = rect
+    screen = g.screen
     rows = 18
     for i in range(rows):
         frac = i / (rows - 1)
-        # Tropical gradient from sunlit turquoise to clear deep aqua
-        c = mix((65, 215, 245), (18, 95, 170), frac)
-        pygame.draw.rect(g.screen, mix(c, g.col("deep"), g.tod * 0.6),
+        c = mix((42, 195, 238), (14, 90, 168), frac)
+        pygame.draw.rect(screen, mix(c, g.col("deep"), g.tod * 0.6),
                          pygame.Rect(int(x0), int(y0 + i * h / rows), int(w), int(h / rows) + 1))
-    for i in range(6):
-        base = y0 + (i + 0.5) * h / 6
-        pts = wave_points(x0, x0 + w, base, 3.8, 24 + i * 4, 1.8 + i * 0.12, t + phase + i, step=12)
+
+    # Swirling seafoam lace ribbons inside board
+    draw_seafoam_swirls(screen, x0, x0 + w, y0 + h * 0.35, t, phase=phase)
+    draw_seafoam_swirls(screen, x0, x0 + w, y0 + h * 0.70, t, phase=phase + 1.5)
+
+    # Puffy wave crest lines inside board
+    for i in range(4):
+        base = y0 + (i + 0.6) * h / 4.2
+        pts = wave_points(x0, x0 + w, base, 3.2, 32 + i * 6, 1.6 + i * 0.15, t + phase + i, step=10)
         pts = [(x, min(max(y, y0 + 2), y0 + h - 2)) for x, y in pts]
-        col = mix((225, 250, 255), (80, 210, 245), 0.4 + 0.08 * (i % 3))
-        pygame.draw.lines(g.screen, col, False, [P(x, y) for x, y in pts], 2)
+        draw_puffy_wave_crest(screen, pts, t + i, sc=0.45, step=10)
+
     # Sparkles
     for i in range(12):
         sx = x0 + (i * 49 + t * 20 * (1 + i % 3)) % w
         sy = y0 + (i * 35) % h
         if math.sin(t * 3.5 + i) > 0.4:
-            pygame.draw.circle(g.screen, (255, 255, 255), P(sx, sy), 2)
+            pygame.draw.circle(screen, (255, 255, 255), P(sx, sy), 2)
 
 
 def draw_frame(g, rect):
@@ -510,46 +654,9 @@ def draw_ship(g, lay, which, name, cells, t, sunk=False):
         circle(0.5, 0.0, s * 0.4, (15, 20, 35))
 
 
-def draw_ship_icon(g, cx, cy, sc, t, hull=(245, 248, 255), bob=True):
-    """Large cute cartoon yacht icon (menu & header badge)."""
-    cy += math.sin(t * 2.2) * sc * 0.08 if bob else 0
-
-    def pl(pts, col):
-        pygame.draw.polygon(g.screen, col, [P(cx + u * sc, cy + v * sc) for u, v in pts])
-
-    # Sleek Yacht Body
-    pl([(-1.1, 0.0), (1.2, 0.0), (0.9, 0.52), (-0.85, 0.52)], (20, 14, 38))
-    pl([(-1.1, -0.05), (1.2, -0.05), (0.9, 0.48), (-0.85, 0.48)], (248, 250, 255))
-    # Teak Deck
-    pl([(-0.95, -0.05), (1.18, -0.05), (1.14, 0.06), (-0.92, 0.06)], (235, 195, 145))
-    # Glass Cabin
-    pl([(-0.5, -0.52), (0.42, -0.52), (0.42, -0.05), (-0.5, -0.05)], (35, 75, 120))
-    # Top white roof
-    pl([(-0.55, -0.62), (0.46, -0.62), (0.44, -0.52), (-0.52, -0.52)], (255, 255, 255))
-    # Radar arch
-    pl([(-0.15, -0.92), (0.1, -0.92), (0.1, -0.62), (-0.15, -0.62)], (240, 200, 50))
-    pygame.draw.circle(g.screen, (255, 255, 255), P(cx, cy - 0.95 * sc), int(sc * 0.16))
-
-    # Portholes
-    for k in range(3):
-        pygame.draw.circle(g.screen, (80, 190, 245), P(cx + (-0.35 + k * 0.28) * sc, cy - 0.26 * sc), max(2, int(sc * 0.07)))
-
-    # Body
-    pl([(-1.05, 0.0), (1.2, 0.0), (0.88, 0.55), (-0.82, 0.55)], shade(hull, 0.65))
-    pl([(-1.05, -0.05), (1.2, -0.05), (0.88, 0.5), (-0.82, 0.5)], hull)
-    pl([(-0.95, -0.05), (1.2, -0.05), (1.16, 0.06), (-0.92, 0.06)], (255, 215, 110))
-    pl([(-0.5, -0.5), (0.4, -0.5), (0.4, -0.05), (-0.5, -0.05)], (248, 250, 255))
-    pl([(-0.15, -0.95), (0.1, -0.95), (0.1, -0.5), (-0.15, -0.5)], (55, 65, 95))
-
-    # Portholes
-    for k in range(3):
-        pygame.draw.circle(g.screen, (90, 175, 245), P(cx + (-0.35 + k * 0.28) * sc, cy - 0.28 * sc), max(2, int(sc * 0.07)))
-
-    # Cute smoke puffs
-    for k in range(3):
-        pygame.draw.circle(g.screen, (255, 255, 255),
-                           P(cx + (0.0 - k * 0.2) * sc, cy - (1.05 + k * 0.3 + math.sin(t * 2 + k) * 0.05) * sc),
-                           max(2, int(sc * (0.16 + k * 0.04))))
+def draw_ship_icon(g, cx, cy, sc, t, hull=None, bob=True):
+    """Icon badge showing the iconic adventure sailboat."""
+    draw_adventure_sailboat(g, cx, cy, sc=sc * 0.45, t=t, bob=bob)
 
 
 # ================================================================== MARKS & HOVER

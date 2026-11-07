@@ -642,7 +642,7 @@ class App:
         # 5 Juicy Candy Buttons
         btn_w, btn_h = 360, 52
         bx = W // 2 - btn_w // 2
-        g.button(bx, 246, btn_w, btn_h, "ISLAND CAMPAIGN (10 Levels)", "campaign", "primary", size=18)
+        g.button(bx, 246, btn_w, btn_h, "ISLAND CAMPAIGN (10 Levels)", "campaign", "coral", size=18)
         g.button(bx, 308, btn_w, btn_h, "CUSTOM BATTLE", "play", "normal", size=18)
         g.button(bx, 370, btn_w, btn_h, "PLAYER vs PLAYER", "play_pvp", "good", size=18)
         g.button(bx, 432, btn_w, btn_h, "HOW TO PLAY", "howto", "normal", size=18)
@@ -817,7 +817,7 @@ class App:
                 start_lbl = "START BATTLE"
             else:
                 start_lbl = "START BATTLE"
-            g.button(px + 18, 506, 360, 64, start_lbl, "start", "primary", size=20)
+            g.button(px + 18, 506, 360, 64, start_lbl, "start", "coral", size=20)
         else:
             rem = len(FLEET) - len(self.human_layout)
             g.button(px + 18, 506, 360, 64, f"Place all ships ({rem} remaining)", "start", "off", enabled=False, size=16)
