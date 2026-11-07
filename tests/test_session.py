@@ -80,5 +80,32 @@ class TestLayout(unittest.TestCase):
         self.assertLess(ey + eh + 60, H)
 
 
+from ui.pvp_session import PvPSession
+
+
+class TestPvP(unittest.TestCase):
+    def test_pvp_turns_and_win(self):
+        rng = random.Random(42)
+        p1_lay = random_layout(rng)
+        p2_lay = random_layout(rng)
+        sess = PvPSession(p1_lay, p2_lay)
+        self.assertEqual(sess.current_player, 1)
+
+        # P1 fires at (0, 0)
+        self.assertTrue(sess.fire((0, 0)))
+        self.assertEqual(sess.current_player, 2)
+        self.assertEqual(sess.shots_p1, 1)
+        self.assertEqual(sess.shots_p2, 0)
+
+        # Duplicate shot by P2 on (0, 0) on P1's board is valid if not yet shot on P1's board
+        self.assertTrue(sess.fire((0, 0)))
+        self.assertEqual(sess.current_player, 1)
+        self.assertEqual(sess.shots_p2, 1)
+
+        # Duplicate shot by P1 on (0, 0) on P2's board rejected
+        self.assertFalse(sess.fire((0, 0)))
+        self.assertEqual(sess.current_player, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,9 +8,10 @@ import random
 import pygame
 
 from core.ai_service import run_algorithm
+from core.campaign import LEVELS, CampaignProgress
 from core.fleet_loader import (DEFAULT_MANUAL_TEXT, DEFAULT_PATH, ensure_dataset, get_layout, layout_from_text,
                                load_dataset, random_layout)
-from core.state import FLEET, HIT, MISS
+from core.state import FLEET, HIT, MISS, N, ship_cells, cells_ok
 from ui import sprites
 from ui.gfx import Gfx, STATIC, mix, shade
 from ui.layout import H, W, Layout
@@ -56,10 +57,22 @@ class App:
         self.dataset_idx = self.dataset_ids.index(dataset_id) if dataset_id in self.dataset_ids else 0
         self.fleet_mode = fleet_mode
         self.human_layout = self._make_layout(fleet_mode)
+        self.manual_placing = False
+        self.manual_ship_idx = 0
+        self.manual_orient = "H"
+        self.placed_order = []
+        self.pvp_setup_player = 1
+        self.p1_layout = None
+        self.p2_layout = None
         self.session = None
         self.overlay = None                  # None | howto | victory | analysis | pvp_pass
         self.analysis = None
-        self.game_mode = "hvai"              # "hvai" = Human vs AI,  "pvp" = Player vs Player
+        self.game_mode = "hvai"              # "hvai" = Human vs AI, "campaign" = Island Levels, "pvp" = Player vs Player
+        self.campaign = CampaignProgress()
+        self.campaign_selected_level = 1
+        self.level_dialog_open = False
+        self.level_hitboxes = []
+        self.earned_stars = 0
         self._init_sounds()
         self._reset_battle()
 
@@ -159,22 +172,87 @@ class App:
             return get_layout(self.dataset_ids[self.dataset_idx], self.layouts_path)
         return random_layout(self.rng)
 
+    SHIP_NAMES = list(FLEET.keys())
+
     def set_fleet(self, mode):
+        self.manual_placing = False
         if mode == "dataset" and self.fleet_mode == "dataset":
             self.dataset_idx = (self.dataset_idx + 1) % len(self.dataset_ids)
         self.fleet_mode = mode
         self.human_layout = self._make_layout(mode)
 
+    def start_manual_placement(self):
+        self.fleet_mode = "custom_manual"
+        self.manual_placing = True
+        self.human_layout = {}
+        self.placed_order = []
+        self.manual_ship_idx = 0
+        self.manual_orient = "H"
+
+    def toggle_manual_orient(self):
+        self.manual_orient = "V" if self.manual_orient == "H" else "H"
+
+    def undo_manual_place(self):
+        if self.placed_order:
+            last = self.placed_order.pop()
+            self.human_layout.pop(last, None)
+            self.manual_ship_idx = len(self.placed_order)
+            self.manual_placing = True
+
+    def reset_manual_placement(self):
+        self.human_layout = {}
+        self.placed_order = []
+        self.manual_ship_idx = 0
+        self.manual_placing = True
+
+    def handle_manual_place(self, cell):
+        if not self.manual_placing or self.manual_ship_idx >= len(self.SHIP_NAMES):
+            return
+        curr_ship = self.SHIP_NAMES[self.manual_ship_idx]
+        curr_len = FLEET[curr_ship]
+        candidate = ship_cells(cell, curr_len, self.manual_orient)
+        occupied = {c for cells in self.human_layout.values() for c in cells}
+        if cells_ok(candidate, occupied):
+            self.human_layout[curr_ship] = candidate
+            self.placed_order.append(curr_ship)
+            self.manual_ship_idx += 1
+            self.play_sound("shoot")
+            if self.manual_ship_idx >= len(self.SHIP_NAMES):
+                self.manual_placing = False
+
     def start_game(self, mode=None):
         if mode:
             self.game_mode = mode
+        if len(self.human_layout) < len(FLEET):
+            return
         if self.game_mode == "pvp":
-            self.session = PvPSession(self.human_layout, random_layout(self.rng))
+            if self.pvp_setup_player == 1:
+                # Save P1 layout and transition to P2 setup
+                self.p1_layout = dict(self.human_layout)
+                self.pvp_setup_player = 2
+                self.human_layout = random_layout(self.rng)
+                self.manual_placing = False
+                return
+            else:
+                self.p2_layout = dict(self.human_layout)
+                self.session = PvPSession(self.p1_layout, self.p2_layout)
+                self.pvp_setup_player = 1
+        elif self.game_mode == "campaign":
+            lvl = next((L for L in LEVELS if L["id"] == self.campaign_selected_level), LEVELS[0])
+            ai = lvl["ai_factory"](self.rng)
+            self.session = GameSession(self.human_layout, random_layout(self.rng), ai=ai)
         else:
             self.session = GameSession(self.human_layout, random_layout(self.rng))
         self._reset_battle()
         self.overlay, self.analysis = None, None
         self.screen_name = "game"
+
+    def start_next_level(self):
+        if self.campaign_selected_level < len(LEVELS):
+            self.campaign_selected_level += 1
+            self.start_game("campaign")
+        else:
+            self.screen_name = "levels"
 
     # ------------------------------------------------------------ input
     def handle_event(self, e):
@@ -182,22 +260,41 @@ class App:
             self.running = False
         elif e.type == pygame.KEYDOWN:
             self.on_key(e.key)
-        elif e.type == pygame.MOUSEBUTTONDOWN and getattr(e, "button", 1) == 1:
-            tag = self.g.hit_test(e.pos)
-            if tag:
-                self.on_button(tag)
-            elif self.screen_name == "game" and not self.overlay:
-                s = self.session
-                if isinstance(s, PvPSession):
-                    # PvP: current player shoots at opposite board
-                    which_target = "enemy" if s.current_player == 1 else "human"
-                    cell = self.lay.cell_at(which_target, e.pos)
+        elif e.type == pygame.MOUSEBUTTONDOWN:
+            btn = getattr(e, "button", 1)
+            if btn == 1:
+                tag = self.g.hit_test(e.pos)
+                if tag:
+                    self.on_button(tag)
+                elif self.screen_name == "levels":
+                    if not getattr(self, "level_dialog_open", False):
+                        for rect, lvl_id in getattr(self, "level_hitboxes", []):
+                            if rect.collidepoint(e.pos):
+                                if self.campaign.is_unlocked(lvl_id):
+                                    self.campaign_selected_level = lvl_id
+                                    self.level_dialog_open = True
+                                    self.play_sound("shoot")
+                                break
+                elif self.screen_name == "setup" and getattr(self, "manual_placing", False):
+                    cell = self.lay.cell_at("human", e.pos)
                     if cell:
-                        self.shoot_pvp(cell)
-                else:
-                    cell = self.lay.cell_at("enemy", e.pos)
-                    if cell:
-                        self.shoot(cell)
+                        self.handle_manual_place(cell)
+                elif self.screen_name == "game" and not self.overlay:
+                    s = self.session
+                    if isinstance(s, PvPSession):
+                        # PvP: current player shoots at opposite board
+                        which_target = "enemy" if s.current_player == 1 else "human"
+                        cell = self.lay.cell_at(which_target, e.pos)
+                        if cell:
+                            self.shoot_pvp(cell)
+                    else:
+                        cell = self.lay.cell_at("enemy", e.pos)
+                        if cell:
+                            self.shoot(cell)
+            elif btn == 3:
+                # Right click to rotate ship during manual placement
+                if self.screen_name == "setup" and getattr(self, "manual_placing", False):
+                    self.toggle_manual_orient()
 
     def on_key(self, k):
         n = self.screen_name
@@ -210,10 +307,18 @@ class App:
                 self.screen_name, self.auto = "menu", False
             else:
                 self.running = False
-        elif n == "setup" and k == pygame.K_r:
-            self.set_fleet("random")
-        elif n == "setup" and k == pygame.K_RETURN:
-            self.start_game()
+        elif n == "setup":
+            if k == pygame.K_r:
+                if getattr(self, "manual_placing", False):
+                    self.toggle_manual_orient()
+                else:
+                    self.set_fleet("random")
+            elif k == pygame.K_z:
+                if getattr(self, "manual_placing", False):
+                    self.undo_manual_place()
+            elif k == pygame.K_RETURN:
+                if len(self.human_layout) == len(FLEET):
+                    self.start_game()
         elif n == "game":
             {pygame.K_h: self.ask_hint, pygame.K_a: self.ai_step, pygame.K_t: self.toggle_auto,
              pygame.K_m: self.toggle_heat, pygame.K_i: self.toggle_analysis,
@@ -221,26 +326,52 @@ class App:
 
     def on_button(self, tag):
         actions = {
-            "play":     lambda: (setattr(self, "game_mode", "hvai"), setattr(self, "screen_name", "setup")),
-            "play_pvp": lambda: (setattr(self, "game_mode", "pvp"),  setattr(self, "screen_name", "setup")),
-            "howto":    lambda: setattr(self, "overlay", "howto"),
-            "quit":     lambda: setattr(self, "running", False),
-            "menu":     lambda: (setattr(self, "screen_name", "menu"),
-                                 setattr(self, "auto", False),
-                                 setattr(self, "overlay", None)),
-            "random":   lambda: self.set_fleet("random"),
-            "manual":   lambda: self.set_fleet("manual"),
-            "dataset":  lambda: self.set_fleet("dataset"),
-            "start":    self.start_game,
-            "restart":  self.start_game,
-            "hint":     self.ask_hint,
-            "ai_step":  self.ai_step,
-            "auto":     self.toggle_auto,
-            "heat":     self.toggle_heat,
-            "analysis": self.toggle_analysis,
-            "tod":      self.toggle_tod,
-            "close":    lambda: setattr(self, "overlay", None),
-            "pass_ok":  lambda: setattr(self, "overlay", None),
+            "campaign":        lambda: (setattr(self, "game_mode", "campaign"),
+                                        setattr(self, "screen_name", "levels"),
+                                        setattr(self, "level_dialog_open", False)),
+            "play":            lambda: (setattr(self, "game_mode", "hvai"),
+                                        setattr(self, "pvp_setup_player", 1),
+                                        setattr(self, "manual_placing", False),
+                                        setattr(self, "screen_name", "setup")),
+            "play_pvp":        lambda: (setattr(self, "game_mode", "pvp"),
+                                        setattr(self, "pvp_setup_player", 1),
+                                        setattr(self, "manual_placing", False),
+                                        setattr(self, "screen_name", "setup")),
+            "levels":          lambda: (setattr(self, "screen_name", "levels"),
+                                        setattr(self, "level_dialog_open", False),
+                                        setattr(self, "overlay", None)),
+            "campaign_battle": lambda: (setattr(self, "game_mode", "campaign"),
+                                        setattr(self, "level_dialog_open", False),
+                                        self.start_game()),
+            "campaign_setup":  lambda: (setattr(self, "game_mode", "campaign"),
+                                        setattr(self, "level_dialog_open", False),
+                                        setattr(self, "screen_name", "setup")),
+            "close_level":     lambda: setattr(self, "level_dialog_open", False),
+            "next_level":      self.start_next_level,
+            "place_manual":    self.start_manual_placement,
+            "manual_rotate":   self.toggle_manual_orient,
+            "manual_undo":     self.undo_manual_place,
+            "manual_reset":    self.reset_manual_placement,
+            "howto":           lambda: setattr(self, "overlay", "howto"),
+            "quit":            lambda: setattr(self, "running", False),
+            "menu":            lambda: (setattr(self, "screen_name", "menu"),
+                                        setattr(self, "auto", False),
+                                        setattr(self, "overlay", None),
+                                        setattr(self, "manual_placing", False),
+                                        setattr(self, "pvp_setup_player", 1)),
+            "random":          lambda: self.set_fleet("random"),
+            "manual":          lambda: self.set_fleet("manual"),
+            "dataset":         lambda: self.set_fleet("dataset"),
+            "start":           self.start_game,
+            "restart":         self.start_game,
+            "hint":            self.ask_hint,
+            "ai_step":         self.ai_step,
+            "auto":            self.toggle_auto,
+            "heat":            self.toggle_heat,
+            "analysis":        self.toggle_analysis,
+            "tod":             self.toggle_tod,
+            "close":           lambda: setattr(self, "overlay", None),
+            "pass_ok":         lambda: setattr(self, "overlay", None),
         }
         if tag in actions:
             actions[tag]()
@@ -357,6 +488,8 @@ class App:
     def _on_end(self):
         self.overlay, self.auto = "victory", False
         s = self.session
+        if self.game_mode == "campaign" and not isinstance(s, PvPSession) and s.winner == "ANDA":
+            self.earned_stars = self.campaign.record_victory(self.campaign_selected_level, s.shots)
         is_win = (not isinstance(s, PvPSession) and s.winner == "ANDA") or \
                  (isinstance(s, PvPSession))
         if is_win:
@@ -444,8 +577,9 @@ class App:
     def draw(self):
         g = self.g
         g.buttons = []
-        sprites.draw_sky(g, self.t)
-        {"menu": self.draw_menu, "setup": self.draw_setup, "game": self.draw_game}[self.screen_name]()
+        if self.screen_name != "levels":
+            sprites.draw_sky(g, self.t)
+        {"menu": self.draw_menu, "levels": self.draw_levels, "setup": self.draw_setup, "game": self.draw_game}[self.screen_name]()
         if self.overlay:
             g.buttons = []           # clicks should not bleed through to the screen behind
             g.dim(160)
@@ -466,16 +600,17 @@ class App:
     def draw_header(self, in_game=False):
         g, t = self.g, self.t
         x0 = 88
-        g.rrect(x0, 28, 66, 66, shade(STATIC["accent"], 0.55), 18)
-        g.rrect(x0, 22, 66, 66, STATIC["accent"], 18, shade(STATIC["accent"], 0.75), 3)
-        sprites.draw_ship_icon(g, x0 + 33, 52, 17, t, bob=False)
-        g.text(TITLE, 40, STATIC["accent"], x0 + 84, 14, True, shadow=True)
-        mode_label = "PLAYER vs PLAYER" if self.game_mode == "pvp" else "BAYESIAN AI  ★  V1"
-        g.pill(x0 + 86, 66, mode_label, 12, fill=STATIC["red"], color=(255, 255, 255), h=24)
+        # Cute rounded warship badge
+        g.rrect(x0, 26, 68, 68, (26, 18, 54), 20)
+        g.rrect(x0, 20, 68, 68, STATIC["accent2"], 20, (255, 235, 140), 2)
+        sprites.draw_ship_icon(g, x0 + 34, 52, 17, t, bob=False)
+        g.bubble_text(TITLE, 38, (255, 255, 255), (32, 22, 68), x0 + 84, 18, bold=True, center=False, extrude=4)
+        mode_label = "PLAYER vs PLAYER" if self.game_mode == "pvp" else "NAVAL COMBAT"
+        g.pill(x0 + 86, 64, mode_label, 12, fill=STATIC["purple"], color=(255, 255, 255), h=24)
         right = 1090
         right = self.pill_button(right, 30, "Menu" if in_game else "Quit", "menu" if in_game else "quit")
         right = self.pill_button(right, 30, "How to Play", "howto")
-        self.pill_button(right, 30, ("DAY" if self.tod_target < 0.5 else "NIGHT") + " MODE  (D)", "tod")
+        self.pill_button(right, 30, ("DAY" if self.tod_target < 0.5 else "NIGHT") + " MODE", "tod")
         if in_game:
             s = self.session
             if isinstance(s, PvPSession):
@@ -493,46 +628,201 @@ class App:
     # ------------------------------------------------------------ menu & setup
     def draw_menu(self):
         g, t = self.g, self.t
-        y = 100 + math.sin(t * 2) * 5
-        g.text("WAR", 60, STATIC["accent2"], W // 2, y - 20, True, True, shadow=True)
-        g.text("BATTLESHIPS", 92, STATIC["accent"], W // 2, y + 40, True, True, shadow=True)
-        # Four buttons: 2 play modes + howto + quit
-        btn_w, btn_h = 360, 62
+        y = 78 + math.sin(t * 2.2) * 5
+
+        # 3D Bubbly Cartoon Title (matching 'Tile Match' logo style)
+        g.bubble_text("WAR", 82, (255, 255, 255), (24, 32, 98), W // 2, y - 30, bold=True, center=True, extrude=8)
+        g.bubble_text("BATTLESHIPS", 80, (255, 240, 185), (38, 22, 76), W // 2, y + 42, bold=True, center=True, extrude=9)
+
+        # 3D Floating Game Tiles flanking the logo (Fire, Cherry, Watermelon)
+        sprites.draw_game_tile(g, W // 2 - 275, y + 8, 62, 66, "fire", t, bob_phase=0.0)
+        sprites.draw_game_tile(g, W // 2 + 185, y - 44, 60, 64, "cherry", t, bob_phase=1.5)
+        sprites.draw_game_tile(g, W // 2 + 285, y + 54, 62, 66, "watermelon", t, bob_phase=3.0)
+
+        # 5 Juicy Candy Buttons
+        btn_w, btn_h = 360, 52
         bx = W // 2 - btn_w // 2
-        g.button(bx, 294, btn_w, btn_h, "PLAY  (Human vs AI)", "play", "primary", size=20)
-        g.button(bx, 370, btn_w, btn_h, "PLAYER vs PLAYER", "play_pvp", "good", size=20)
-        g.button(bx, 446, btn_w, btn_h, "HOW TO PLAY", "howto", "normal", size=20)
-        g.button(bx, 522, btn_w, btn_h, "QUIT", "quit", "danger", size=20)
+        g.button(bx, 246, btn_w, btn_h, "ISLAND CAMPAIGN (10 Levels)", "campaign", "primary", size=18)
+        g.button(bx, 308, btn_w, btn_h, "CUSTOM BATTLE", "play", "normal", size=18)
+        g.button(bx, 370, btn_w, btn_h, "PLAYER vs PLAYER", "play_pvp", "good", size=18)
+        g.button(bx, 432, btn_w, btn_h, "HOW TO PLAY", "howto", "normal", size=18)
+        g.button(bx, 494, btn_w, btn_h, "QUIT", "quit", "danger", size=18)
+
+        # Casual Game Progress / Capsule Bar (matching 'Loading...' pill bar in reference)
+        cw, ch = 320, 20
+        g.text("READY TO PLAY", 14, (255, 255, 255), W // 2, 566, True, center=True, shadow=True)
+        pulse_fill = 0.85 + 0.15 * math.sin(t * 3)
+        g.bar(W // 2 - cw // 2, 590, cw, ch, pulse_fill, STATIC["good"])
+
+        # Sailing cartoon warship
         x = (t * 70) % (W + 500) - 250
-        sprites.draw_ship_icon(g, x, 640 + math.sin(t * 2.4) * 4, 52, t)
+        sprites.draw_ship_icon(g, x, 675 + math.sin(t * 2.4) * 4, 46, t)
+
         right = 1300
-        self.pill_button(right, 30, ("DAY" if self.tod_target < 0.5 else "NIGHT") + " MODE  (D)", "tod")
+        self.pill_button(right, 30, ("DAY" if self.tod_target < 0.5 else "NIGHT") + " MODE", "tod")
+
+    def draw_levels(self):
+        g, t = self.g, self.t
+        mx, my = pygame.mouse.get_pos()
+        self.level_hitboxes = sprites.draw_island_saga_map(g, self.campaign, t, mx, my)
+
+        # Header bar
+        x0 = 40
+        g.rrect(x0, 20, 56, 56, STATIC["accent2"], 18, (255, 235, 140), 2)
+        sprites.draw_ship_icon(g, x0 + 28, 48, 14, t, bob=False)
+        g.bubble_text("ISLAND SAGA", 36, (255, 255, 255), (32, 22, 68), x0 + 72, 14, bold=True, center=False, extrude=4)
+
+        tot_stars = self.campaign.total_stars()
+        max_stars = len(LEVELS) * 3
+        g.pill(x0 + 74, 58, f"TOTAL STARS:  {tot_stars} / {max_stars}", 13, fill=STATIC["warn"], color=(38, 22, 10), h=24)
+
+        right = 1300
+        right = self.pill_button(right, 26, "Menu", "menu")
+        right = self.pill_button(right, 26, "How to Play", "howto")
+        self.pill_button(right, 26, ("DAY" if self.tod_target < 0.5 else "NIGHT") + " MODE", "tod")
+
+        # Level Briefing Modal if open
+        if getattr(self, "level_dialog_open", False):
+            lvl = next((L for L in LEVELS if L["id"] == self.campaign_selected_level), LEVELS[0])
+            stars = self.campaign.get_stars(lvl["id"])
+            s3, s2 = lvl["stars_req"]
+
+            # Modal background dim
+            dim_surf = pygame.Surface((W, H), pygame.SRCALPHA)
+            dim_surf.fill((10, 15, 30, 160))
+            g.screen.blit(dim_surf, (0, 0))
+
+            mw, mh = 620, 440
+            mx_box, my_box = W // 2 - mw // 2, H // 2 - mh // 2
+            g.card(mx_box, my_box, mw, mh, f"LEVEL {lvl['id']:02d}: {lvl['name'].upper()}")
+
+            g.bubble_text(lvl["name"], 32, (255, 235, 140), (32, 22, 68), W // 2, my_box + 22, bold=True, center=True, extrude=4)
+            g.pill(W // 2, my_box + 76, f"Opponent: {lvl['opponent']}", 14, fill=STATIC["purple"], center=True)
+            g.text(f'"{lvl["dialogue"]}"', 15, g.col("dim"), W // 2, my_box + 115, False, True)
+
+            gw, gh = mw - 60, 110
+            gx = W // 2 - gw // 2
+            gy = my_box + 150
+            g.rrect(gx, gy, gw, gh, g.col("pill"), 14, g.col("edge"), 2)
+            g.text("STAR REWARDS", 13, STATIC["warn"], gx + 20, gy + 12, True)
+            g.text(f"3 Stars: Finish in <= {s3} shots", 15, (255, 255, 255), gx + 20, gy + 38, True)
+            g.text(f"2 Stars: Finish in <= {s2} shots", 14, g.col("dim"), gx + 20, gy + 62, False)
+            g.text("1 Star: Sink all enemy ships", 14, g.col("dim"), gx + 20, gy + 84, False)
+
+            if stars > 0:
+                best_txt = f"BEST SCORE: {stars} / 3 Stars"
+                g.text(best_txt, 14, STATIC["good"], W // 2, gy + gh + 14, True, True)
+            else:
+                g.text("Status: Not Completed Yet", 14, g.col("dim"), W // 2, gy + gh + 14, True, True)
+
+            btn_y = my_box + mh - 75
+            g.button(mx_box + 30, btn_y, 250, 54, "START BATTLE", "campaign_battle", "good", size=18)
+            g.button(mx_box + 295, btn_y, 160, 54, "Setup Fleet", "campaign_setup", "primary", size=16)
+            g.button(mx_box + 470, btn_y, 120, 54, "Close", "close_level", "danger", size=16)
 
     def draw_setup(self):
         g, L = self.g, self.lay
         self.draw_header()
-        fleet_label = "YOUR FLEET" if self.game_mode == "hvai" else "PLAYER 1 FLEET"
+        fleet_label = "YOUR FLEET" if self.game_mode == "hvai" else f"PLAYER {self.pvp_setup_player} FLEET"
         g.pill(76, 120, fleet_label, 14, fill=STATIC["blue"])
         sprites.draw_board_water(g, L, "human", self.t)
         for nm, cells in self.human_layout.items():
             sprites.draw_ship(g, L, "human", nm, cells, self.t)
+
+        # Hover preview during manual ship placement
+        if self.manual_placing and self.manual_ship_idx < len(self.SHIP_NAMES):
+            curr_ship = self.SHIP_NAMES[self.manual_ship_idx]
+            curr_len = FLEET[curr_ship]
+            mx, my = pygame.mouse.get_pos()
+            hover_cell = L.cell_at("human", (mx, my))
+            if hover_cell:
+                candidate = ship_cells(hover_cell, curr_len, self.manual_orient)
+                occupied = {c for cells in self.human_layout.values() for c in cells}
+                is_valid = cells_ok(candidate, occupied)
+                hl_col = STATIC["good"] if is_valid else STATIC["bad"]
+                for c in candidate:
+                    if 0 <= c[0] < N and 0 <= c[1] < N:
+                        cx, cy, cw, ch = L.cell_rect("human", c)
+                        g.rrect(cx + 2, cy + 2, cw - 4, ch - 4,
+                                mix(hl_col, (255, 255, 255), 0.35 if is_valid else 0.12),
+                                6, hl_col, 2)
+
         px = 508
         g.card(px, 150, 764, 450, "FLEET ARRANGEMENT")
-        src = {"random": "Random", "manual": "Manual (example)", "dataset": f"Dataset #{self.dataset_ids[self.dataset_idx]}"}
-        g.pill(px + 18, 184, f"Source: {src[self.fleet_mode]}", 14, fill=STATIC["good"], color=(10, 40, 20))
-        g.button(px + 18, 236, 340, 54, "Randomize  (R)", "random", size=18)
-        g.button(px + 18, 306, 340, 54, "Manual (example)", "manual", size=18)
-        g.button(px + 18, 376, 340, 54, "Dataset  (click = next)", "dataset", size=18)
-        g.text("SHIPS", 13, g.col("dim"), px + 420, 190, True)
+
+        # Left Column - Controls
+        if self.manual_placing:
+            if self.manual_ship_idx < len(self.SHIP_NAMES):
+                curr_ship = self.SHIP_NAMES[self.manual_ship_idx]
+                curr_len = FLEET[curr_ship]
+                g.pill(px + 18, 184, "MODE: MANUAL PLACEMENT", 13, fill=STATIC["accent2"], color=(255, 255, 255))
+                g.text(f"Placing: {curr_ship} ({curr_len} cells)", 16, STATIC["accent"], px + 18, 226, True)
+                g.text("Hover & click on the board to place", 13, g.col("dim"), px + 18, 250, False)
+
+                rot_lbl = f"Rotate: {'HORIZONTAL' if self.manual_orient == 'H' else 'VERTICAL'}"
+                g.button(px + 18, 274, 340, 50, rot_lbl, "manual_rotate", "primary", size=14)
+
+                g.button(px + 18, 334, 164, 46, "Undo", "manual_undo", "normal", size=14, enabled=bool(self.placed_order))
+                g.button(px + 194, 334, 164, 46, "Clear All", "manual_reset", "danger", size=14)
+
+                g.button(px + 18, 390, 340, 46, "Randomize Fleet", "random", "off", size=14)
+            else:
+                g.pill(px + 18, 184, "ALL SHIPS PLACED!", 14, fill=STATIC["good"], color=(10, 40, 20))
+                g.text("Your fleet is ready for combat!", 15, g.col("text"), px + 18, 236, True)
+                g.text("Click START below to proceed.", 13, g.col("dim"), px + 18, 262, False)
+
+                g.button(px + 18, 304, 164, 48, "Undo Last", "manual_undo", "normal", size=14)
+                g.button(px + 194, 304, 164, 48, "Re-place All", "place_manual", "primary", size=14)
+                g.button(px + 18, 364, 340, 48, "Randomize Fleet", "random", "off", size=14)
+        else:
+            mode_lbl = "Custom Layout" if self.fleet_mode == "custom_manual" else ("Random" if self.fleet_mode == "random" else ("Manual Preset" if self.fleet_mode == "manual" else f"Dataset #{self.dataset_ids[self.dataset_idx]}"))
+            g.pill(px + 18, 184, f"Source: {mode_lbl}", 14, fill=STATIC["good"], color=(255, 255, 255))
+            g.button(px + 18, 224, 340, 48, "Place Ships Manually", "place_manual", "good", size=16)
+            g.button(px + 18, 278, 340, 48, "Randomize Fleet", "random", "normal", size=16)
+            g.button(px + 18, 332, 164, 46, "Manual Preset", "manual", "normal", size=14)
+            g.button(px + 194, 332, 164, 46, "Dataset Preset", "dataset", "normal", size=14)
+            g.text("Click 'Place Ships Manually' to position your ships.", 12, g.col("dim"), px + 18, 410, False)
+
+        # Right Column - Ships checklist
+        g.text("FLEET STATUS", 13, g.col("dim"), px + 390, 184, True)
         for i, (nm, ln) in enumerate(FLEET.items()):
-            yy = 224 + i * 40
-            hull = sprites.SHIP_COL[nm][0]
+            yy = 212 + i * 44
+            is_placed = nm in self.human_layout
+            is_cur = self.manual_placing and (self.manual_ship_idx < len(self.SHIP_NAMES)) and (self.SHIP_NAMES[self.manual_ship_idx] == nm)
+
+            hull = sprites.SHIP_COL[nm][0] if is_placed else (STATIC["accent"] if is_cur else (60, 72, 92))
             for k in range(ln):
-                g.rrect(px + 420 + k * 26, yy, 22, 24, hull, 6, shade(hull, 0.6), 2)
-            g.text(f"{nm} ({ln})", 15, g.col("text"), px + 420 + 5 * 26 + 12, yy + 2, True)
-        start_lbl = "START BATTLE" if self.game_mode == "hvai" else "START  P1 vs P2"
-        g.button(px + 18, 500, 340, 66, start_lbl, "start", "primary", size=22)
-        g.button(px + 396, 500, 200, 66, "< Menu", "menu", size=18)
+                g.rrect(px + 390 + k * 26, yy, 22, 24, hull, 6, shade(hull, 0.6), 2)
+
+            if is_placed:
+                stat_txt = "PLACED"
+                stat_col = STATIC["good"]
+            elif is_cur:
+                stat_txt = "PLACING"
+                stat_col = STATIC["accent"]
+            else:
+                stat_txt = "WAITING"
+                stat_col = g.col("dim")
+
+            g.text(f"{nm} ({ln})", 14, g.col("text"), px + 390 + 5 * 26 + 12, yy + 2, True)
+            g.text(stat_txt, 11, stat_col, px + 390 + 5 * 26 + 12, yy + 22, True)
+
+        g.text("Left Click: Place  •  Right Click: Rotate", 11, g.col("dim"), px + 390, 442, False)
+
+        # Bottom Action Buttons
+        if len(self.human_layout) == len(FLEET):
+            if self.game_mode == "pvp" and self.pvp_setup_player == 1:
+                start_lbl = "CONFIRM P1  •  SETUP P2"
+            elif self.game_mode == "pvp":
+                start_lbl = "START BATTLE"
+            else:
+                start_lbl = "START BATTLE"
+            g.button(px + 18, 506, 360, 64, start_lbl, "start", "primary", size=20)
+        else:
+            rem = len(FLEET) - len(self.human_layout)
+            g.button(px + 18, 506, 360, 64, f"Place all ships ({rem} remaining)", "start", "off", enabled=False, size=16)
+
+        g.button(px + 396, 506, 200, 64, "Menu", "menu", size=18)
 
     # ------------------------------------------------------------ game
     def view_shots(self, board, which):
@@ -606,7 +896,7 @@ class App:
             elif s.awaiting_ai or self.busy:
                 txt = "AI is aiming..."
             else:
-                txt = "Click a cell on ENEMY RADAR to fire  •  H AI hint  •  T auto-play"
+                txt = "Click a cell on ENEMY RADAR to fire"
 
         tw = g.text_size(txt, 16, True)[0] + 44
         g.rrect(W / 2 - tw / 2, H - 66, tw, 38, g.col("pill"), 19, g.col("edge"), 2)
@@ -621,7 +911,7 @@ class App:
         bw = g.text_size(text, 36, True)[0] + 60
         bx, by = W // 2 - bw // 2, 280
         surf = pygame.Surface((int(bw), 56), pygame.SRCALPHA)
-        pygame.draw.rect(surf, (*shade(col, 0.6), int(220 * alpha)), surf.get_rect(), border_radius=14)
+        pygame.draw.rect(surf, (*shade(col, 0.6), int(220 * alpha)), pygame.Rect(0, 0, int(bw), 56), border_radius=14)
         g.screen.blit(surf, (bx, by))
         pygame.draw.rect(g.screen, (*col, int(255 * alpha)),
                          pygame.Rect(int(bx), int(by), int(bw), 56), 3, border_radius=14)
@@ -632,10 +922,10 @@ class App:
         is_pvp = isinstance(s, PvPSession)
         x, y, w, h = L.panel
 
-        # ---- Fleet health card
-        g.card(x, y, w, 100, "FLEET STATUS")
+        # ---- Fleet health card (Card 1: y = 150, h = 180)
+        g.card(x, y, w, 180, "FLEET STATUS")
         for i, (nm, total) in enumerate(FLEET.items()):
-            yy = y + 36 + i * 32
+            yy = y + 36 + i * 27
             if is_pvp:
                 board = s.b1 if s.current_player == 1 else s.b2
             else:
@@ -644,13 +934,14 @@ class App:
             col = STATIC["good"] if left == total else STATIC["warn"] if left > 0 else STATIC["bad"]
             g.text(nm[:10], 14, g.col("text"), x + 18, yy, True)
             g.bar(x + 90, yy + 2, w - 90 - 70, 16, left / total, col)
-            g.text(f"{left}/{total}", 15, g.col("text"),
-                   x + w - 18 - g.text_size(f"{left}/{total}", 15, True)[0], yy, True)
+            g.text(f"{left}/{total}", 14, g.col("text"),
+                   x + w - 18 - g.text_size(f"{left}/{total}", 14, True)[0], yy, True)
 
-        # ---- Tools card (HvAI only)
+        # ---- Tools card (Card 2: y = 340, h = 175)
+        tools_y = y + 190
         if not is_pvp:
-            g.card(x, 262, w, 212, "TOOLS")
-            tw2, th = (w - 36 - 12) // 2, 52
+            g.card(x, tools_y, w, 175, "TOOLS")
+            tw2, th = (w - 36 - 12) // 2, 42
             off = s.finished
             tools = (("AI Hint",    "best shot",        "H", "hint",     STATIC["accent2"],    False),
                      ("AI Fire",    "1 step",           "A", "ai_step",  STATIC["blue"],       False),
@@ -659,27 +950,28 @@ class App:
                      ("Analysis",   "Bayes vs Random",  "I", "analysis", (60, 170, 190),       False),
                      ("Restart",    "start over",       "R", "restart",  STATIC["red"],        False))
             for i, (title, sub, key, tag, col, active) in enumerate(tools):
-                g.tool(x + 18 + (i % 2) * (tw2 + 12), 262 + 36 + (i // 2) * 58,
+                g.tool(x + 18 + (i % 2) * (tw2 + 12), tools_y + 34 + (i // 2) * 44,
                        tw2, th, title, sub, key, tag, col, active,
                        enabled=not off or tag in ("analysis", "restart"))
         else:
-            g.card(x, 262, w, 86, "TOOLS")
-            g.tool(x + 18, 298, w - 36, 46, "Restart", "start over", "R", "restart", STATIC["red"])
+            g.card(x, tools_y, w, 86, "TOOLS")
+            g.tool(x + 18, tools_y + 32, w - 36, 44, "Restart", "start over", "R", "restart", STATIC["red"])
 
-        # ---- Battle log card
-        g.card(x, 486, w, 164, "BATTLE LOG")
+        # ---- Battle log card (Card 3: y = 525, h = 135)
+        log_y = y + 375
+        g.card(x, log_y, w, 135, "BATTLE LOG")
         if not is_pvp and self.hint:
-            yy = g.paragraph(f"Hint: {self.hint.text} ({self.hint.percent:.1f}%)", 14,
-                              STATIC["warn"], x + 18, 514, w - 36, 2, True)
-            g.paragraph(self.hint.why[0] if self.hint.why else "", 12, g.col("dim"),
+            yy = g.paragraph(f"Hint: {self.hint.text} ({self.hint.percent:.1f}%)", 13,
+                              STATIC["warn"], x + 18, log_y + 36, w - 36, 2, True)
+            g.paragraph(self.hint.why[0] if self.hint.why else "", 11, g.col("dim"),
                         x + 18, yy + 2, w - 36, 2)
         else:
-            for i, (who, text, result) in enumerate(self.log_view[-4:]):
-                yy = 512 + i * 32
+            for i, (who, text, result) in enumerate(self.log_view[-3:]):
+                yy = log_y + 34 + i * 30
                 col = STATIC["good"] if result != MISS else g.col("dim")
-                g.rrect(x + 16, yy, w - 32, 27, g.col("pill"), 8)
-                g.rrect(x + 16, yy, 5, 27, col, 3)
-                g.text(text[:46], 12, g.col("text"), x + 30, yy + 6, True)
+                g.rrect(x + 16, yy, w - 32, 26, g.col("pill"), 8)
+                g.rrect(x + 16, yy, 5, 26, col, 3)
+                g.text(text[:46], 12, g.col("text"), x + 30, yy + 5, True)
 
     def draw_status(self):
         s, g, L = self.session, self.g, self.lay
@@ -709,7 +1001,7 @@ class App:
     def _modal(self, title, h):
         g = self.g
         g.card(W // 2 - 460, 130, 920, h)
-        g.text(title, 40, STATIC["accent"], W // 2, 146, True, True, shadow=True)
+        g.bubble_text(title, 36, (255, 240, 180), (32, 22, 68), W // 2, 146, bold=True, center=True, extrude=5)
 
     def draw_howto(self):
         self._modal("HOW TO PLAY", 470)
@@ -724,29 +1016,57 @@ class App:
         s, g = self.session, self.g
         cp = s.current_player   # player who is NEXT to play
         g.card(W // 2 - 320, H // 2 - 170, 640, 340)
-        g.text("*** PASS THE DEVICE ***", 30, STATIC["accent"], W // 2, H // 2 - 150, True, True, shadow=True)
-        g.text(f"Player {cp}'s Turn", 34, STATIC["accent2"], W // 2, H // 2 - 96, True, True)
+        g.bubble_text("PASS THE DEVICE", 30, (255, 255, 255), (32, 22, 68), W // 2, H // 2 - 150, bold=True, center=True, extrude=5)
+        g.bubble_text(f"Player {cp}'s Turn", 34, STATIC["accent2"], (32, 22, 68), W // 2, H // 2 - 96, bold=True, center=True, extrude=5)
         g.text(f"Hand the device to Player {cp}.", 20, g.col("text"), W // 2, H // 2 - 42, True, True)
         g.text("(Boards are hidden — do not peek!)", 15, g.col("dim"), W // 2, H // 2 - 10, True, True)
-        g.button(W // 2 - 150, H // 2 + 50, 300, 60, f"I'm Player {cp}  — Ready!", "pass_ok", "primary", size=19)
+        g.button(W // 2 - 150, H // 2 + 50, 300, 60, f"I'm Player {cp}  — Ready!", "pass_ok", "good", size=19)
 
     def draw_victory(self):
         s, g = self.session, self.g
         is_pvp = isinstance(s, PvPSession)
+        is_camp = (self.game_mode == "campaign")
         if is_pvp:
             title = f"PLAYER {s.winner} WINS!"
+        elif is_camp and s.winner == "ANDA":
+            title = f"LEVEL {self.campaign_selected_level:02d} CLEAR!"
         else:
             title = "YOU WIN!" if s.winner == "ANDA" else "AI WINS!"
-        self._modal(title, 340)
-        if is_pvp:
+
+        modal_h = 390 if (is_camp and s.winner == "ANDA") else 340
+        self._modal(title, modal_h)
+
+        if is_camp and s.winner == "ANDA":
+            stars = getattr(self, "earned_stars", 1)
+            star_w = 46
+            start_x = W // 2 - (stars * star_w) // 2 + star_w // 2
+            for i in range(stars):
+                st_x = start_x + i * star_w
+                pygame.draw.circle(g.screen, (255, 215, 45), (st_x, 216), 18)
+                pygame.draw.circle(g.screen, (255, 255, 255), (st_x - 3, 216 - 3), 5)
+            g.text(f"Shots: {s.shots}   •   Stars Earned: {stars} / 3", 18, (255, 255, 255), W // 2, 248, True, True)
+            g.text(s.log[-1][:80] if s.log else "", 14, g.col("dim"), W // 2, 276, True, True)
+
+            by = 320
+            if self.campaign_selected_level < len(LEVELS):
+                g.button(W // 2 - 290, by, 180, 56, "Next Level", "next_level", "good", size=18)
+                g.button(W // 2 - 95, by, 180, 56, "Island Map", "levels", "primary", size=18)
+                g.button(W // 2 + 100, by, 180, 56, "Menu", "menu", "normal", size=18)
+            else:
+                g.button(W // 2 - 200, by, 190, 56, "Island Map", "levels", "primary", size=18)
+                g.button(W // 2 + 10, by, 190, 56, "Menu", "menu", "normal", size=18)
+        elif is_pvp:
             g.text(f"Player 1 shots: {s.shots_p1}   |   Player 2 shots: {s.shots_p2}",
                    20, g.col("text"), W // 2, 230, True, True)
+            g.text(s.log[-1][:80] if s.log else "", 15, g.col("dim"), W // 2, 275, True, True)
+            g.button(W // 2 - 270, 340, 250, 60, "Play Again", "restart", "primary", size=20)
+            g.button(W // 2 + 20, 340, 250, 60, "Menu", "menu", size=20)
         else:
             g.text(f"Your shots: {s.shots}   |   AI assistance used: {'yes' if s.used_ai else 'no'}",
                    20, g.col("text"), W // 2, 230, True, True)
-        g.text(s.log[-1][:80], 15, g.col("dim"), W // 2, 275, True, True)
-        g.button(W // 2 - 270, 340, 250, 60, "Play Again", "restart", "primary", size=20)
-        g.button(W // 2 + 20, 340, 250, 60, "Menu", "menu", size=20)
+            g.text(s.log[-1][:80] if s.log else "", 15, g.col("dim"), W // 2, 275, True, True)
+            g.button(W // 2 - 270, 340, 250, 60, "Play Again", "restart", "primary", size=20)
+            g.button(W // 2 + 20, 340, 250, 60, "Menu", "menu", size=20)
 
     def draw_analysis(self):
         a, g = self.analysis, self.g

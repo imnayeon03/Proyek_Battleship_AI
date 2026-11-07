@@ -87,7 +87,8 @@ def make():
         _color(c); assert len(pts) >= 2
         for p in pts:
             _chk(p[0], p[1])
-    m.draw = types.SimpleNamespace(rect=rect, circle=circle, line=line, polygon=polygon, lines=lines)
+    def ellipse(s, c, r, width=0): _color(c); _rect(r); _chk(width)
+    m.draw = types.SimpleNamespace(rect=rect, circle=circle, line=line, polygon=polygon, lines=lines, ellipse=ellipse)
     m.event = types.SimpleNamespace(get=lambda: [])
     m.mouse = types.SimpleNamespace(get_pos=lambda: (0, 0))
     return m
