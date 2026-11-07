@@ -159,43 +159,56 @@ def wave_points(x0, x1, base, amp, length, speed, t, step=22):
     return pts
 
 
-def draw_puffy_wave_crest(screen, pts, t, sc=1.0, step=12):
-    """Draw cloud-like puffy white wave foam crests along wave points, matching reference image."""
-    # 1. Soft mint-aqua bottom shadow billows
-    for i in range(0, len(pts), step):
+def _draw_wave_whitecap(screen, pts, t, phase_offset=0.0, opacity_sc=1.0):
+    """Draw realistic whitecap foam streaks along a wave crest — no big circles.
+    Uses short tapered brushstroke lines and tiny spray dots."""
+    n = len(pts)
+    rng_seed = int(phase_offset * 100)
+    for i in range(0, n - 1, 3):
         px, py = pts[i]
-        r = int((13 + 4 * math.sin(i * 0.4 + t * 3)) * sc)
-        pygame.draw.circle(screen, (185, 230, 245), P(px, py + 4 * sc), r)
-    # 2. Main brilliant white foam billows
-    for i in range(0, len(pts), step):
-        px, py = pts[i]
-        r = int((12 + 4 * math.sin(i * 0.4 + t * 3)) * sc)
-        pygame.draw.circle(screen, (255, 255, 255), P(px, py), r)
-    # 3. Bright top highlight puffs
-    for i in range(0, len(pts), step * 2):
-        px, py = pts[i]
-        r = int((7 + 3 * math.sin(i * 0.8 + t * 4)) * sc)
-        pygame.draw.circle(screen, (255, 255, 255), P(px, py - 3 * sc), r)
+        # Only paint caps where wave is near its crest (derivative ~0)
+        if i + 2 < n:
+            dy_prev = pts[max(0, i-2)][1] - py
+            if dy_prev < -0.5:   # skip troughs
+                continue
+        # Foam streak length varies
+        streak = int(14 + 8 * math.sin(i * 0.6 + t * 3.1 + phase_offset))
+        alpha = int(255 * min(1.0, opacity_sc * (0.6 + 0.4 * math.sin(i * 1.3 + t * 2))))
+        col = (min(255, alpha), min(255, alpha), 255)
+        # Main horizontal foam streak
+        pygame.draw.line(screen, col,
+                         P(px - streak // 2, py),
+                         P(px + streak // 2, py), 2)
+        # Thinner trailing wisp below
+        pygame.draw.line(screen, (200, 230, 255),
+                         P(px - streak // 3, py + 2),
+                         P(px + streak // 3, py + 2), 1)
+        # Tiny spray dots
+        if i % 6 == 0:
+            sr = max(1, int(1.5 * opacity_sc))
+            pygame.draw.circle(screen, (255, 255, 255),
+                                P(px + streak // 4, py - 2), sr)
 
 
 def draw_seafoam_swirls(screen, x0, x1, y_base, t, phase=0.0):
-    """Draw curved seafoam lace ribbons across the wave surface, matching reference image."""
-    swirl_col = (235, 252, 255)
-    width = x1 - x0
-    count = max(2, int(width // 160))
-    for s_i in range(count):
-        sx = x0 + ((s_i * 180 + t * 25 + phase * 60) % max(1, width))
-        sy = y_base + math.sin(t * 2 + s_i + phase) * 12
+    """Draw subtle horizontal water ripple lines (not circles)."""
+    swirl_col = (200, 240, 255)
+    dim_col   = (160, 210, 240)
+    width = int(x1 - x0)
+    for s_i in range(3):
+        ox = (s_i * 220 + t * 28 + phase * 55) % max(1, width)
+        sx = x0 + ox
+        sy = y_base + math.sin(t * 1.8 + s_i * 1.2 + phase) * 6
         pts = [
-            P(sx, sy),
-            P(sx + 35, sy - 8),
-            P(sx + 75, sy + 6),
-            P(sx + 115, sy - 4),
-            P(sx + 145, sy + 2)
+            P(sx,       sy),
+            P(sx + 28,  sy - 4),
+            P(sx + 55,  sy + 3),
+            P(sx + 85,  sy - 2),
+            P(sx + 110, sy + 1)
         ]
-        pygame.draw.lines(screen, swirl_col, False, pts, 2)
-        pygame.draw.circle(screen, (255, 255, 255), P(sx + 40, sy - 14), 2)
-        pygame.draw.circle(screen, (255, 255, 255), P(sx + 90, sy + 12), 2)
+        pygame.draw.lines(screen, dim_col, False, pts, 1)
+        pts2 = [P(x + 1, y + 1) for x, y in pts]
+        pygame.draw.lines(screen, swirl_col, False, pts2, 1)
 
 
 def draw_adventure_sailboat(g, cx, cy, sc=1.0, t=0.0, bob=True):
@@ -289,20 +302,22 @@ def draw_adventure_sailboat(g, cx, cy, sc=1.0, t=0.0, bob=True):
 
 
 def draw_sea(g, t):
-    """Stylized cartoon ocean with dramatic volumetric puffy foam waves,
-    swirling seafoam lace, and adventure sailboat matching the user's reference image."""
+    """Realistic ocean background with multi-layer rolling waves,
+    subtle whitecap foam streaks, and deep blue-to-teal gradient."""
     screen = g.screen
 
-    # 1. Base Ocean Gradient (Cerulean horizon -> Deep Royal Ocean)
-    bands = 28
+    # 1. Deep Ocean Gradient — dark navy at bottom, lighter teal near horizon
+    bands = 32
     for i in range(bands):
         y0 = HORIZON + i * (H - HORIZON) // bands
         frac = i / bands
-        c = mix((28, 175, 230), (10, 80, 160), frac)
-        pygame.draw.rect(screen, mix(c, (14, 28, 65), g.tod * 0.7),
-                         pygame.Rect(0, y0, W, (H - HORIZON) // bands + 2))
+        # Day: teal-blue gradient / Night: deep navy
+        c_day  = mix((32, 160, 220), (8, 48, 110), frac)
+        c_night = mix((10, 30, 72), (4, 12, 38), frac)
+        c = mix(c_day, c_night, g.tod * 0.85)
+        pygame.draw.rect(screen, c, pygame.Rect(0, y0, W, (H - HORIZON) // bands + 2))
 
-    # 2. Distant Tropical Cliff & Fairytale Tower on Right Horizon (matching reference!)
+    # 2. Distant Tropical Cliff & Fairytale Tower
     cliff_x = W - 220
     cliff_y = HORIZON + 15
     cliff_pts = [
@@ -310,8 +325,9 @@ def draw_sea(g, t):
         P(cliff_x + 110, cliff_y - 35), P(cliff_x + 180, cliff_y - 15),
         P(W, cliff_y + 10), P(W, cliff_y + 90), P(cliff_x, cliff_y + 90)
     ]
-    pygame.draw.polygon(screen, (160, 125, 95), cliff_pts)
-    pygame.draw.polygon(screen, (75, 195, 85), [
+    cliff_col = mix((160, 125, 95), (60, 50, 42), g.tod * 0.5)
+    pygame.draw.polygon(screen, cliff_col, cliff_pts)
+    pygame.draw.polygon(screen, mix((75, 195, 85), (25, 60, 35), g.tod * 0.6), [
         P(cliff_x + 35, cliff_y - 20), P(cliff_x + 110, cliff_y - 35),
         P(cliff_x + 180, cliff_y - 15), P(cliff_x + 175, cliff_y - 5),
         P(cliff_x + 105, cliff_y - 22), P(cliff_x + 40, cliff_y - 12)
@@ -332,50 +348,72 @@ def draw_sea(g, t):
             P(fx - f["sz"] * 0.7, fy), P(fx, fy + f["sz"] * 0.45)
         ])
 
-    # 4. Multi-Layer Rolling Oceanic Waves with Volumetric Puffy Foam Crests
+    # 4. Multi-layer realistic rolling waves — no big foam circles
     wave_layers = [
-        (HORIZON + 35, 7.0, 75, 1.2, (25, 155, 220), 0.7, 18),
-        (HORIZON + 95, 10.0, 85, 1.4, (20, 140, 208), 0.9, 16),
-        (HORIZON + 175, 14.0, 95, 1.6, (16, 120, 192), 1.15, 14),
-        (HORIZON + 265, 18.0, 110, 1.9, (12, 100, 175), 1.35, 12),
+        # (base_y, amp, period, speed, wave_col, whitecap_opacity, step)
+        (HORIZON + 30,  5.0,  85, 1.1,  (28, 148, 215),  0.55, 15),
+        (HORIZON + 90,  8.0,  95, 1.3,  (22, 130, 200),  0.70, 14),
+        (HORIZON + 170, 11.0, 108, 1.55, (16, 112, 185),  0.85, 13),
+        (HORIZON + 268, 15.0, 125, 1.80, (12, 95,  168),  1.00, 12),
     ]
 
-    for base_y, amp, period, speed, wave_col, foam_sc, step in wave_layers:
-        pts = wave_points(0, W, base_y, amp, period, speed, t, step=12)
+    for base_y, amp, period, speed, wave_col, foam_op, step in wave_layers:
+        wc = mix(wave_col, g.col("sea2"), g.tod * 0.65)
+        pts = wave_points(0, W, base_y, amp, period, speed, t, step=10)
         poly = pts + [(W, H), (0, H)]
-        pygame.draw.polygon(screen, mix(wave_col, g.col("sea2"), g.tod * 0.7), [P(x, y) for x, y in poly])
-        draw_seafoam_swirls(screen, 0, W, base_y + 18, t, phase=base_y * 0.05)
-        draw_puffy_wave_crest(screen, pts, t + base_y * 0.1, sc=foam_sc, step=step)
+        pygame.draw.polygon(screen, wc, [P(x, y) for x, y in poly])
+
+        # Subtle horizontal shimmer line along wave crest
+        shimmer = mix((180, 230, 255), (80, 140, 200), g.tod * 0.7)
+        pygame.draw.lines(screen, shimmer, False, [P(x, y) for x, y in pts], 1)
+
+        # Draw seafoam swirls (subtle ribbon lines, NOT circles)
+        draw_seafoam_swirls(screen, 0, W, base_y + 15, t, phase=base_y * 0.04)
+
+        # Realistic whitecap streaks along crest
+        _draw_wave_whitecap(screen, pts, t, phase_offset=base_y * 0.03, opacity_sc=foam_op)
 
 
 def draw_sea_surface(g, rect, t, phase=0.0):
-    """Playful cartoon sea surface inside game board: tropical turquoise depth + puffy waves + seafoam swirls."""
+    """Realistic ocean surface inside game board — deep gradient + ripple lines, no puffy circles."""
     x0, y0, w, h = rect
     screen = g.screen
-    rows = 18
+
+    # Gradient — lighter teal near top, deeper navy at bottom
+    rows = 20
     for i in range(rows):
         frac = i / (rows - 1)
-        c = mix((42, 195, 238), (14, 90, 168), frac)
-        pygame.draw.rect(screen, mix(c, g.col("deep"), g.tod * 0.6),
+        c_day  = mix((38, 180, 240), (10, 60, 140), frac)
+        c_night = mix((10, 35, 85), (4, 14, 42), frac)
+        c = mix(c_day, c_night, g.tod * 0.75)
+        pygame.draw.rect(screen, c,
                          pygame.Rect(int(x0), int(y0 + i * h / rows), int(w), int(h / rows) + 1))
 
-    # Swirling seafoam lace ribbons inside board
-    draw_seafoam_swirls(screen, x0, x0 + w, y0 + h * 0.35, t, phase=phase)
-    draw_seafoam_swirls(screen, x0, x0 + w, y0 + h * 0.70, t, phase=phase + 1.5)
-
-    # Puffy wave crest lines inside board
+    # 3-4 horizontal rolling wave ripple lines
     for i in range(4):
-        base = y0 + (i + 0.6) * h / 4.2
-        pts = wave_points(x0, x0 + w, base, 3.2, 32 + i * 6, 1.6 + i * 0.15, t + phase + i, step=10)
-        pts = [(x, min(max(y, y0 + 2), y0 + h - 2)) for x, y in pts]
-        draw_puffy_wave_crest(screen, pts, t + i, sc=0.45, step=10)
+        base = y0 + (i + 0.7) * h / 4.5
+        pts_raw = wave_points(x0, x0 + w, base, 2.5, 30 + i * 8, 1.4 + i * 0.18, t + phase + i * 0.9, step=8)
+        pts_clipped = [(x, min(max(y, y0 + 2), y0 + h - 2)) for x, y in pts_raw]
 
-    # Sparkles
-    for i in range(12):
-        sx = x0 + (i * 49 + t * 20 * (1 + i % 3)) % w
-        sy = y0 + (i * 35) % h
-        if math.sin(t * 3.5 + i) > 0.4:
-            pygame.draw.circle(screen, (255, 255, 255), P(sx, sy), 2)
+        # Dark shadow line under each ripple
+        shd = mix((10, 50, 110), (5, 20, 55), g.tod * 0.5)
+        pygame.draw.lines(screen, shd, False,
+                          [(int(x), int(y) + 1) for x, y in pts_clipped], 1)
+        # Bright shimmer line on crest
+        shi = mix((130, 220, 255), (55, 130, 195), g.tod * 0.6)
+        pygame.draw.lines(screen, shi, False,
+                          [(int(x), int(y)) for x, y in pts_clipped], 1)
+
+        # Whitecap streaks — short tapered brushstrokes on every other wave
+        if i % 2 == 0:
+            _draw_wave_whitecap(screen, pts_clipped, t, phase_offset=phase + i * 0.7, opacity_sc=0.55)
+
+    # Subtle sparkle glints (tiny 1px dots, not big circles)
+    for k in range(18):
+        sx = int(x0 + (k * 43 + t * 22 * (1 + k % 3)) % w)
+        sy = int(y0 + (k * 31) % h)
+        if math.sin(t * 4.0 + k) > 0.65:
+            pygame.draw.circle(screen, (220, 248, 255), (sx, sy), 1)
 
 
 def draw_frame(g, rect):
